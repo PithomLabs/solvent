@@ -1,0 +1,8 @@
+{
+  "comment_id": 220123456,
+  "issue_or_pr_number": 17234,
+  "repository": "etcd-io/etcd",
+  "author": "hexfusion",
+  "body": "Fixed in v3.5.15. I have tested the fix in staging and confirmed no regression. The multipart MIME parsing now properly validates input size limits before processing.",
+  "created_at": "2024-06-12T10:00:00Z"
+}

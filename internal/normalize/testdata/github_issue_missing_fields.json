@@ -1,0 +1,5 @@
+{
+  "event_type": "opened",
+  "repository": "etcd-io/etcd",
+  "title": "Test issue with missing required fields"
+}

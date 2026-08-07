@@ -1,0 +1,11 @@
+{
+  "event_type": "pull_request",
+  "pr_number": 1234,
+  "repository": "etcd-io/etcd",
+  "title": "Fix multipart MIME parsing vulnerability",
+  "merged": false,
+  "state": "closed",
+  "body": "Fixes the multipart MIME parsing vulnerability.",
+  "base_branch": "main",
+  "head_sha": "abc123def456"
+}
