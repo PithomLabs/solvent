@@ -1,0 +1,12 @@
+{
+  "event_type": "merged",
+  "pr_number": 17250,
+  "repository": "etcd-io/etcd",
+  "title": "Fix multipart MIME parsing vulnerability (CVE-2024-24790)",
+  "body": "This PR fixes the denial of service vulnerability in multipart MIME parsing.\n\nChanges:\n- Add input size limits for multipart parsing\n- Validate Content-Type headers before processing\n- Add tests for malformed MIME data\n\nFixes #17234",
+  "state": "closed",
+  "merged": true,
+  "merged_at": "2024-06-10T18:45:00Z",
+  "base_branch": "release-3.5",
+  "head_sha": "abc123def456789012345678901234567890abcd"
+}
