@@ -31,16 +31,24 @@ var DebtMapping = map[string][]DebtRule{
 }
 
 // DebtItemsForEvidence returns the debt items that the given evidence retires.
-// Returns nil if no rule matches.
+// Returns nil if no rule matches. When multiple rules match, the result is the
+// union of all matched rules' items in table order, with duplicates removed.
 func DebtItemsForEvidence(sourceType, assertion string) []string {
 	rules, ok := DebtMapping[sourceType]
 	if !ok {
 		return nil
 	}
+	seen := make(map[string]bool)
+	var result []string
 	for _, r := range rules {
 		if r.Match.MatchString(assertion) {
-			return r.Items
+			for _, item := range r.Items {
+				if !seen[item] {
+					seen[item] = true
+					result = append(result, item)
+				}
+			}
 		}
 	}
-	return nil
+	return result
 }
