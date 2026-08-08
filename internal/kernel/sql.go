@@ -35,6 +35,22 @@ const (
 		SELECT count(*) FROM action_intent a
 		JOIN belief b ON b.id = a.belief_id
 		WHERE a.state = 'live' AND b.status <> 'promoted' AND a.scenario_id = $1::UUID`
+
+	sqlEnsureBelief = `
+		WITH existing AS (
+			SELECT id FROM belief
+			WHERE scenario_id = $1::UUID AND claim = $2::STRING
+			LIMIT 1
+		),
+		inserted AS (
+			INSERT INTO belief (scenario_id, claim, claim_type)
+			SELECT $1::UUID, $2::STRING, $3::STRING
+			WHERE NOT EXISTS (SELECT 1 FROM existing)
+			RETURNING id
+		)
+		SELECT id FROM existing
+		UNION ALL
+		SELECT id FROM inserted`
 )
 
 // descendantsCTE computes the transitive descendants of $1 within scenario $2.
@@ -97,6 +113,7 @@ func SQLCatalog() []NamedSQL {
 		{"add_evidence", sqlAddEvidence},
 		{"audit_live_on_nonpromoted", sqlAuditLiveOnNonPromoted},
 		{"enter_belief", sqlEnterBelief},
+		{"ensure_belief", sqlEnsureBelief},
 		{"intent_on_promoted", sqlIntentOnPromoted},
 		{"promote", sqlPromote},
 		{"retire_debt", sqlRetireDebt},

@@ -156,3 +156,22 @@ func (s *Store) AuditLiveOnNonPromoted(ctx context.Context, scenarioID string) (
 	err := s.db.QueryRowContext(ctx, sqlAuditLiveOnNonPromoted, scenarioID).Scan(&n)
 	return n, err
 }
+
+// EnsureBelief returns the ID of a belief with the given claim in the scenario.
+// If no such belief exists, it creates one with the given claim type, full starting
+// debt, and status='entered'.
+//
+// The find-or-create is a single transaction — no TOCTOU boundary.
+// The caller does not need to know whether the belief was newly created.
+func (s *Store) EnsureBelief(ctx context.Context, scenarioID, claim string, ct ClaimType) (string, error) {
+	var id string
+	err := crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, sqlEnsureBelief,
+			scenarioID, claim, string(ct),
+		).Scan(&id)
+	})
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}

@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // DefaultDSN points at a database whose name ends in _test, which is what Reset
@@ -98,12 +99,45 @@ func Open(dsn string) (*sql.DB, error) {
 	return sql.Open("pgx", dsn)
 }
 
+// lockPath returns the path for a database reset lock file.
+func lockPath(name string) string {
+	return fmt.Sprintf("/tmp/%s.reset.lock", name)
+}
+
+// AcquireResetLock creates a lock file to prevent concurrent test suites from
+// operating on the same database. Blocks until the lock is acquired. The caller
+// MUST call ReleaseResetLock when the test suite is done.
+func AcquireResetLock(name string) {
+	path := lockPath(name)
+	for {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+		if err == nil {
+			_ = f.Close()
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// ReleaseResetLock removes the lock file.
+func ReleaseResetLock(name string) {
+	_ = os.Remove(lockPath(name))
+}
+
+// DBNameFromDSN extracts the database name for use with AcquireResetLock/ReleaseResetLock.
+func DBNameFromDSN(dsn string) (string, error) {
+	return DBName(dsn)
+}
+
 // Reset drops and recreates the suite's database, then applies the frozen DDL.
 //
 // GUARD (M2-R1): it refuses outright unless the database name ends in "_test". This
 // function destroys data; a mistyped DSN pointing at `fable`, or at a shared cluster,
 // would otherwise take the M0 and M1 evidence with it. The refusal is an error, not a
 // warning.
+//
+// The caller MUST hold AcquireResetLock before calling Reset, and MUST hold it through
+// the entire test suite (m.Run) before calling ReleaseResetLock.
 func Reset(ctx context.Context, dsn, schemaPath string) error {
 	name, err := DBName(dsn)
 	if err != nil {
@@ -135,7 +169,7 @@ func Reset(ctx context.Context, dsn, schemaPath string) error {
 	if _, err := adminDB.ExecContext(ctx, fmt.Sprintf("DROP DATABASE IF EXISTS %q CASCADE", name)); err != nil {
 		return fmt.Errorf("drop %s: %w", name, err)
 	}
-	if _, err := adminDB.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE %q", name)); err != nil {
+	if _, err := adminDB.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %q", name)); err != nil {
 		return fmt.Errorf("create %s: %w", name, err)
 	}
 

@@ -33,10 +33,14 @@ func TestMain(m *testing.M) {
 	ctx := context.Background()
 	dsn = testdb.DSN()
 
+	name, _ := testdb.DBNameFromDSN(dsn)
+	testdb.AcquireResetLock(name)
+
 	// The guard lives in testdb.Reset: it refuses any database not named *_test, and
 	// prints the redacted DSN before dropping anything (M2-R1, N1).
 	if err := testdb.Reset(ctx, dsn, schemaPath); err != nil {
 		fmt.Fprintf(os.Stderr, "M2 cannot start: %v\n", err)
+		testdb.ReleaseResetLock(name)
 		os.Exit(1)
 	}
 
@@ -44,10 +48,12 @@ func TestMain(m *testing.M) {
 	shared, err = testdb.Open(dsn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "M2 cannot start: open pool: %v\n", err)
+		testdb.ReleaseResetLock(name)
 		os.Exit(1)
 	}
 	if err := shared.PingContext(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "M2 cannot start: ping: %v\n", err)
+		testdb.ReleaseResetLock(name)
 		os.Exit(1)
 	}
 
@@ -70,6 +76,7 @@ func TestMain(m *testing.M) {
 		_ = os.Remove(failurePath)
 	}
 
+	testdb.ReleaseResetLock(name)
 	os.Exit(code)
 }
 
