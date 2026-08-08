@@ -167,3 +167,44 @@ func TestIntegration_DeterminismAcrossReplays(t *testing.T) {
 		t.Errorf("expected 1 evidence after 100 replays, got %d", evidenceCount)
 	}
 }
+
+func TestIntegration_RealFixtureRetiresFullDebt(t *testing.T) {
+	ctx := context.Background()
+	sc := integrationScenario(6)
+
+	// Feed realistic Wave 2 fixture bodies through the pipeline.
+	// maintainer_fixes.json body: "Fixed in v3.5.15. The multipart MIME parsing now properly validates input size limits."
+	// maintainer_no_regression.json body: "Confirmed no regression. All existing tests pass and the fix resolves the vulnerability."
+	// maintainer_reviewed.json body: "Reviewed by security team. The fix properly addresses the input validation vulnerability."
+	b := derive.DerivedBelief{
+		Claim:          "etcd v3.5.x is vulnerable to CVE-2024-24790",
+		Classification: "derived",
+		SupportingEvidence: []normalize.NormalizedEvidence{
+			{SourceType: "kev_entry", SourceURL: "https://nvd.nist.gov/vuln/detail/CVE-2024-24790", ProvenanceClass: "external_feed", ContentSHA256: "real01", Assertion: "etcd v3.5.x is vulnerable to CVE-2024-24790"},
+			{SourceType: "release", SourceURL: "https://github.com/etcd-io/etcd/releases/tag/v3.5.15", ProvenanceClass: "external_feed", ContentSHA256: "real02", Assertion: "release v3.5.15 published"},
+			{SourceType: "maintainer_comment", SourceURL: "https://github.com/etcd-io/etcd/issues/17234#issuecomment-220123456", ProvenanceClass: "external_feed", ContentSHA256: "real03", Assertion: "Fixed in v3.5.15. The multipart MIME parsing now properly validates input size limits."},
+			{SourceType: "maintainer_comment", SourceURL: "https://github.com/etcd-io/etcd/issues/17234#issuecomment-220123457", ProvenanceClass: "external_feed", ContentSHA256: "real04", Assertion: "Confirmed no regression. All existing tests pass and the fix resolves the vulnerability."},
+			{SourceType: "maintainer_comment", SourceURL: "https://github.com/etcd-io/etcd/issues/17234#issuecomment-220123458", ProvenanceClass: "external_feed", ContentSHA256: "real05", Assertion: "Reviewed by security team. The fix properly addresses the input validation vulnerability."},
+		},
+	}
+
+	if err := belief.Process(ctx, shared, sc, b); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+
+	// Verify: belief must be promoted (all 6 debt items retired).
+	var status string
+	_ = shared.QueryRowContext(ctx,
+		`SELECT status FROM belief WHERE scenario_id=$1::UUID`, sc).Scan(&status)
+	if status != "promoted" {
+		t.Errorf("expected promoted, got %q", status)
+	}
+
+	// Verify: no remaining debt.
+	var debtLen int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT coalesce(array_length(debt,1),0) FROM belief WHERE scenario_id=$1::UUID`, sc).Scan(&debtLen)
+	if debtLen != 0 {
+		t.Errorf("expected 0 debt items, got %d", debtLen)
+	}
+}

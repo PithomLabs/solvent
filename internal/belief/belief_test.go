@@ -1,14 +1,18 @@
 package belief_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"testing"
 
 	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/internal/derive"
+	"github.com/PithomLabs/solvent/internal/kernel"
 	"github.com/PithomLabs/solvent/internal/normalize"
 	"github.com/PithomLabs/solvent/internal/testdb"
 
@@ -325,5 +329,130 @@ func TestProcess_Determinism(t *testing.T) {
 
 	if count != 1 {
 		t.Errorf("expected 1 belief after 100 iterations (idempotent), got %d", count)
+	}
+}
+
+func TestProcess_PromoteHardFailure(t *testing.T) {
+	ctx := context.Background()
+	sc := scenario(8)
+
+	// Create a separate pool and close it immediately.
+	// Process will fail with a connection error (not ErrPromotionBlocked),
+	// proving that non-ErrPromotionBlocked errors propagate to the caller.
+	badDB, err := testdb.Open(dsn)
+	if err != nil {
+		t.Fatalf("open bad db: %v", err)
+	}
+	_ = badDB.Close()
+
+	b := derive.DerivedBelief{
+		Claim:          "belief that will fail on promote",
+		Classification: "derived",
+		SupportingEvidence: []normalize.NormalizedEvidence{
+			{
+				SourceType:      "kev_entry",
+				SourceURL:       "https://nvd.nist.gov/vuln/detail/CVE-2024-24790",
+				ProvenanceClass: "external_feed",
+				ContentSHA256:   "deadbeef12",
+			},
+		},
+	}
+
+	err = belief.Process(ctx, badDB, sc, b)
+	if err == nil {
+		t.Fatal("expected error from Process with closed pool, got nil")
+	}
+	if errors.Is(err, kernel.ErrPromotionBlocked) {
+		t.Errorf("error should NOT be ErrPromotionBlocked, got: %v", err)
+	}
+}
+
+func TestProcess_ContradictionLogsWarning(t *testing.T) {
+	ctx := context.Background()
+	sc := scenario(9)
+
+	// Capture slog output.
+	var buf bytes.Buffer
+	orig := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(orig)
+
+	b := derive.DerivedBelief{
+		Claim:          "prior belief is contradicted",
+		Classification: "derived",
+		Contradicts: []normalize.NormalizedEvidence{
+			{
+				SourceType: "maintainer_comment",
+				SourceURL:  "https://github.com/etcd-io/etcd/issues/17234#issuecomment-220123460",
+			},
+		},
+	}
+
+	err := belief.Process(ctx, shared, sc, b)
+	if err != nil {
+		t.Fatalf("Process returned error: %v", err)
+	}
+
+	output := buf.String()
+	if output == "" {
+		t.Fatal("expected slog warning output, got empty buffer")
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("contradiction received")) {
+		t.Errorf("expected warning about contradiction, got: %s", output)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("https://github.com/etcd-io/etcd/issues/17234#issuecomment-220123460")) {
+		t.Errorf("expected source_url in log output, got: %s", output)
+	}
+}
+
+func TestDebtItemsForEvidence_UnionRules(t *testing.T) {
+	// Realistic fixture body from maintainer_no_regression.json:
+	// "Confirmed no regression. All existing tests pass and the fix resolves the vulnerability."
+	// Matches R2 (tested|confirmed) AND R3 (no regression).
+	// Must return the UNION: needToyCheck, needNullModel, needObstruction.
+	body := "Confirmed no regression. All existing tests pass and the fix resolves the vulnerability."
+	items := belief.DebtItemsForEvidence("maintainer_comment", body)
+
+	expected := map[string]bool{
+		"needToyCheck":    false,
+		"needNullModel":   false,
+		"needObstruction": false,
+	}
+	for _, item := range items {
+		if _, ok := expected[item]; !ok {
+			t.Errorf("unexpected debt item: %s", item)
+		} else {
+			expected[item] = true
+		}
+	}
+	for item, found := range expected {
+		if !found {
+			t.Errorf("missing expected debt item: %s", item)
+		}
+	}
+	// Verify no duplicates.
+	if len(items) != 3 {
+		t.Errorf("expected 3 unique items, got %d: %v", len(items), items)
+	}
+}
+
+func TestDebtItemsForEvidence_SingleRuleMatch(t *testing.T) {
+	items := belief.DebtItemsForEvidence("kev_entry", "etcd is vulnerable to CVE-2024-24790")
+	if len(items) != 1 || items[0] != "needMap" {
+		t.Errorf("expected [needMap], got %v", items)
+	}
+}
+
+func TestDebtItemsForEvidence_NoMatch(t *testing.T) {
+	items := belief.DebtItemsForEvidence("maintainer_comment", "lgtm")
+	if items != nil {
+		t.Errorf("expected nil, got %v", items)
+	}
+}
+
+func TestDebtItemsForEvidence_UnknownSourceType(t *testing.T) {
+	items := belief.DebtItemsForEvidence("unknown_source", "anything")
+	if items != nil {
+		t.Errorf("expected nil, got %v", items)
 	}
 }

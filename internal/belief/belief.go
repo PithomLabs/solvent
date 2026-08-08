@@ -7,7 +7,9 @@ package belief
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/PithomLabs/solvent/internal/derive"
 	"github.com/PithomLabs/solvent/internal/kernel"
@@ -36,11 +38,11 @@ func Process(ctx context.Context, db *sql.DB, scenarioID string, b derive.Derive
 	// Contradictions: retraction path.
 	if len(b.Contradicts) > 0 {
 		for _, c := range b.Contradicts {
-			// The contradicted evidence carries the belief ID in its SourceURL
-			// or is matched by claim. For the MVP, contradictions are logged
-			// but the actual retraction target must be resolved by the caller.
-			// This is a known limitation — see WAVE3_IMPLEMENTATION.md.
-			_ = c
+			slog.Warn("belief.Process: contradiction received, automatic retraction deferred",
+				"source_url", c.SourceURL,
+				"source_type", c.SourceType,
+				"claim", b.Claim,
+			)
 		}
 		return nil
 	}
@@ -83,9 +85,10 @@ func Process(ctx context.Context, db *sql.DB, scenarioID string, b derive.Derive
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		// ErrPromotionBlocked means debt is not fully retired.
-		// This is expected — the belief stays 'entered'.
-		return nil
+		if errors.Is(err, kernel.ErrPromotionBlocked) {
+			return nil
+		}
+		return fmt.Errorf("belief.Process: promote %s: %w", beliefID, err)
 	}
 
 	return nil

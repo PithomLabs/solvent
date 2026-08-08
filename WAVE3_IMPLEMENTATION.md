@@ -3,7 +3,10 @@
 ## Summary
 
 Wave 3 wires DerivedBelief outputs into the Transactional Belief Ledger.
-All 14 new tests pass on CockroachDB v26.2.0. Build clean, vet clean, gofmt clean.
+All tests pass on CockroachDB v26.2.0. Build clean, vet clean, gofmt clean.
+
+**Rework applied** (see `WAVE3_REWORK.md`): W3-P1 (Promote error handling),
+W3-P2 (contradiction surfacing), W3-P3 (debt mapping union). 5 new tests added.
 
 ---
 
@@ -16,7 +19,8 @@ etcd-specific entries for the MVP.
 
 - `DebtRule` struct: `Match *regexp.Regexp`, `Items []string`
 - `DebtMapping`: map of source type → rules
-- `DebtItemsForEvidence(sourceType, assertion)`: returns matched debt items
+- `DebtItemsForEvidence(sourceType, assertion)`: returns the **union** of all
+  matching rules' items, deduplicated, in table order
 
 ### internal/belief/belief.go
 
@@ -30,7 +34,13 @@ Steps:
 4. `RetireDebt` for each debt item the evidence covers
 5. `Promote` (may fail with ErrPromotionBlocked — acceptable)
 
-Contradictions bypass steps 2–4 (known limitation for MVP).
+Contradictions: emit `slog.Warn` with source_url, source_type, claim, then
+return nil (automatic retraction deferred to caller).
+
+Error handling:
+- `ErrPromotionBlocked` → nil (debt not yet fully retired)
+- Any other Promote error → returned wrapped (fail loudly)
+- Context cancellation → `ctx.Err()` returned
 
 Evidence deduplication: `evidenceExists()` checks if evidence with the same
 `content_sha256` already exists for the belief before inserting. TOCTOU window
@@ -38,7 +48,7 @@ accepted for MVP per wave3_qa.md decision.
 
 ### internal/belief/belief_test.go
 
-7 unit tests:
+13 unit tests:
 
 | Test | Purpose | Result |
 |------|---------|--------|
@@ -49,10 +59,16 @@ accepted for MVP per wave3_qa.md decision.
 | TestProcess_Contradiction | Contradiction does not enter belief | PASS |
 | TestProcess_MalformedBelief | Empty claim rejected | PASS |
 | TestProcess_Determinism | 100 replays → 1 belief, 1 evidence | PASS |
+| TestProcess_PromoteHardFailure | Non-ErrPromotionBlocked error propagates | PASS |
+| TestProcess_ContradictionLogsWarning | Contradiction emits slog.Warn | PASS |
+| TestDebtItemsForEvidence_UnionRules | Union of all matching rules (realistic body) | PASS |
+| TestDebtItemsForEvidence_SingleRuleMatch | Single rule match works | PASS |
+| TestDebtItemsForEvidence_NoMatch | No matching rules → nil | PASS |
+| TestDebtItemsForEvidence_UnknownSourceType | Unknown source type → nil | PASS |
 
 ### internal/belief/integration_test.go
 
-4 integration tests:
+5 integration tests:
 
 | Test | Purpose | Result |
 |------|---------|--------|
@@ -60,6 +76,7 @@ accepted for MVP per wave3_qa.md decision.
 | TestIntegration_PartialDebtBlocksPromotion | Incomplete debt blocks promotion, blocks intent | PASS |
 | TestIntegration_MultiScenarioIsolation | Two scenarios independent | PASS |
 | TestIntegration_DeterminismAcrossReplays | 100 replays → 1 belief, 1 evidence | PASS |
+| TestIntegration_RealFixtureRetiresFullDebt | Real fixture bodies retire all 6 debt items → promoted | PASS |
 
 ### internal/intent/intent.go
 
@@ -126,14 +143,14 @@ Added to `SQLCatalog()`.
 ## Test Results
 
 ```
-ok  internal/kernel   1.837s  (28 tests)
-ok  internal/belief   1.848s  (11 tests)
-ok  internal/intent   1.113s  (3 tests)
-ok  internal/derive   0.002s  (16 tests)
-ok  internal/normalize 0.011s (11 tests)
+ok  internal/kernel   1.644s  (28 tests)
+ok  internal/belief   1.921s  (18 tests)
+ok  internal/intent   1.126s  (3 tests)
+ok  internal/derive   0.003s  (16 tests)
+ok  internal/normalize 0.009s (11 tests)
 ```
 
-Total: 69 tests, all PASS.
+Total: 76 tests, all PASS.
 
 ## Verification
 
@@ -143,11 +160,14 @@ Total: 69 tests, all PASS.
 
 ## Known Limitations
 
-1. **Contradictions**: MVP logs contradictions but does not resolve the retraction
-   target. The actual retraction target must be resolved by the caller.
+1. **Contradictions**: Contradictions are surfaced via `slog.Warn` but automatic
+   retraction remains deferred. The retraction target must be resolved by the caller.
 
 2. **Evidence dedup TOCTOU**: `evidenceExists()` has a TOCTOU window between check
    and insert. Accepted for MVP per wave3_qa.md decision.
 
 3. **Schema**: `embedding VECTOR(1536) NULL` column not yet added to `db/001_schema.sql`.
    B-14 test not updated. Deferred.
+
+4. **Test harness**: `go test ./...` (parallel) exhibits a race on the shared
+   `fable_test` database. Tests must be run serially. See `WAVE3_REWORK.md`.
