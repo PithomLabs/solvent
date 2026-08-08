@@ -60,10 +60,18 @@ that the gate is structural; keep it structural.
   `New`, `EnterBelief`, `AddEvidence`, `RetireDebt`, `Promote` (→ `ErrPromotionBlocked`),
   `IntentOnPromoted` (→ `ErrActionOnUnpromoted`), `RetractCascade`, `AuditLiveOnNonPromoted`,
   plus `FullDebt` and the `ClaimType` constants. This package must not import demo/domain code.
+- **Pipeline:** `internal/pipeline` chains normalize → derive → belief.Process → ProposeIfNew
+  into a single pass over evidence fixtures. Evidence aggregation is CVE-aware: each distinct
+  CVE-bearing claim remains independent; non-CVE supporting evidence merges into the matching
+  primary. Contradictions emit `slog.Warn` with source provenance and produce no ledger mutation.
+  Intent proposal is replay-idempotent under sequential execution.
+- **CLI:** `cmd/solvent` is the demo entry point. It runs the full pipeline against local JSON
+  fixtures and prints a deterministic transcript with source provenance, belief state, and audit.
 - **Substrate:** CockroachDB. `cockroach-go/v2` (`crdb.ExecuteTx`).
 - **Agents (thin):** a *claim agent* (ingest evidence → enter/type claims → retire debt →
   merge duplicates by vector similarity before insert) and a *security agent* (read promoted
-  beliefs → write intents). Keep them dumb; the memory layer is the intelligence.
+  beliefs → write intents). Keep them dumb; the memory layer is the intelligence. The pipeline
+  serves as the integration layer for the MVP demo.
 
 ## Go + CockroachDB conventions
 
@@ -87,6 +95,8 @@ that the gate is structural; keep it structural.
 
 - **The schema is frozen.** Do not edit `db/001_schema.sql`. A needed schema change is a
   blocking finding to report, not an edit to make.
+- **Frozen waves must not be modified.** Waves 1–4 (normalize, derive, belief/intent/kernel,
+  pipeline/CLI) are frozen. New work requires Technical Lead approval.
 - **No new tables, agents, or evidence feeds.** The system is deliberately three-tables-two-
   agents-one-feed-one-graph. Additions belong in a post-hackathon backlog.
 - **Kernel stays domain-agnostic.** No feed name (KEV, GitHub, etcd, …) appears in
@@ -109,9 +119,28 @@ cancel atomically), and the **three-cell isolation experiment** (naive schema @ 
 silent corruption; @ SERIALIZABLE → 40001 refusal; hardened schema @ READ COMMITTED → FK refusal).
 Swapping the domain changes the ingestor and the narrative; it changes nothing above Layer 4.
 
+The CLI entry point is `cmd/solvent`. Run it with `--scenario <UUID> --reset` to process the
+full etcd KEV fixture set and produce a deterministic transcript proving pipeline correctness.
+
+## Current State
+
+Waves 1–4 are frozen. Each wave was implemented, reworked, adversarially reviewed, and verified
+against a live CockroachDB v26.2.0 cluster.
+
+| Wave | Scope | Status | Tests |
+|---|---|---|---|
+| 1 — Normalize | `internal/normalize` | Frozen | 11 |
+| 2 — Derive | `internal/derive` | Frozen | 16 |
+| 3 — Kernel | `internal/belief`, `internal/intent`, kernel additions | Frozen | 48 |
+| 4 — Pipeline | `internal/pipeline`, `cmd/solvent` | Frozen | 9 |
+
+**Total: 84 tests, all passing.** Serial execution required (test harness shares a single
+CockroachDB database).
+
 ## Before you commit
 
 - `go build ./...` and `go vet ./...` clean; no write path outside `crdb.ExecuteTx`.
+- All 84 tests pass (run serially): `go test ./internal/kernel/ ./internal/belief/ ./internal/intent/ ./internal/derive/ ./internal/normalize/ ./internal/pipeline/ -count=1`.
 - Kernel invariant tests green — and green a second time with all embeddings NULL (I-6).
 - The pure-SQL proof still passes: `proof/02_lifecycle_and_invariants.sql` and the isolation
   harness in `proof/`. These are the source of truth the Go must reproduce, not diverge from.
