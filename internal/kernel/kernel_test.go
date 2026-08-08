@@ -814,6 +814,88 @@ func TestW3_B15_I7_StaticGate(t *testing.T) {
 	})
 }
 
+// ---------------------------------------------------------------- EnsureBelief
+
+func TestW3_EnsureBelief_New(t *testing.T) {
+	rec.begin("3")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(30)
+
+	id, err := st.EnsureBelief(ctx, sc, "claim created by EnsureBelief", kernel.Derived)
+
+	var status string
+	var debtLen int
+	if err == nil {
+		err = shared.QueryRowContext(ctx,
+			`SELECT status, coalesce(array_length(debt,1),0) FROM belief WHERE id=$1::UUID`,
+			id).Scan(&status, &debtLen)
+	}
+
+	ok := err == nil && looksLikeUUID(id) && status == "entered" && debtLen == 6
+	rec.check(t, ok, Case{
+		ID: "W3-Ensure-New", Wave: "3",
+		Purpose:   "EnsureBelief creates a new belief with full debt when claim does not exist",
+		Expected:  "parseable UUID; status='entered', 6 debt items",
+		Observed:  fmt.Sprintf("id parseable=%t, status=%q, debt items=%d", looksLikeUUID(id), status, debtLen),
+		Invariant: "EnsureBelief — find-or-create in one transaction",
+		Receipt:   receiptOf(err),
+	})
+}
+
+func TestW3_EnsureBelief_Existing(t *testing.T) {
+	rec.begin("3")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(31)
+	claim := "claim that already exists"
+
+	id1, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived)
+	if err != nil {
+		t.Fatalf("first EnsureBelief: %v", err)
+	}
+
+	id2, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived)
+
+	var count int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM belief WHERE scenario_id=$1::UUID AND claim=$2`, sc, claim).Scan(&count)
+
+	ok := err == nil && id1 == id2 && count == 1
+	rec.check(t, ok, Case{
+		ID: "W3-Ensure-Existing", Wave: "3",
+		Purpose:   "EnsureBelief returns existing belief ID when claim already exists in scenario",
+		Expected:  "same ID returned; 1 belief row (no duplicate)",
+		Observed:  fmt.Sprintf("id1=%s, id2=%s, same=%t; count=%d", id1, id2, id1 == id2, count),
+		Invariant: "EnsureBelief — dedup is transactional (no TOCTOU)",
+		Receipt:   receiptOf(err),
+	})
+}
+
+func TestW3_EnsureBelief_DifferentScenario(t *testing.T) {
+	rec.begin("3")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	scA, scB := scenario(32), scenario(320)
+	claim := "same claim in different scenarios"
+
+	idA, err := st.EnsureBelief(ctx, scA, claim, kernel.Derived)
+	if err != nil {
+		t.Fatalf("scenario A: %v", err)
+	}
+	idB, err := st.EnsureBelief(ctx, scB, claim, kernel.Derived)
+
+	ok := err == nil && idA != idB
+	rec.check(t, ok, Case{
+		ID: "W3-Ensure-DiffScenario", Wave: "3",
+		Purpose:   "EnsureBelief creates separate beliefs for the same claim in different scenarios",
+		Expected:  "two different IDs",
+		Observed:  fmt.Sprintf("idA=%s, idB=%s, different=%t", idA, idB, idA != idB),
+		Invariant: "EnsureBelief — scenario-scoped uniqueness",
+		Receipt:   receiptOf(err),
+	})
+}
+
 // ---------------------------------------------------------------- helpers
 
 func retireAll(ctx context.Context, st *kernel.Store, id string) error {
