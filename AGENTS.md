@@ -82,12 +82,12 @@ Waves 1–4 are frozen. Each wave was implemented, reworked, adversarially revie
 
 | Wave | Scope | Status | Tests |
 |---|---|---|---|
-| 1 — Normalize | `internal/normalize` | Frozen | 12 |
-| 2 — Derive | `internal/derive` | Frozen | 16 |
-| 3 — Kernel | `internal/belief`, `internal/intent`, kernel additions | Frozen | 48 |
-| 4 — Pipeline | `internal/pipeline`, `cmd/solvent` | Frozen | 9 |
+| 1 — Normalize | `internal/normalize` | Frozen | 26 |
+| 2 — Derive | `internal/derive` | Frozen | 18 |
+| 3 — Kernel | `internal/belief`, `internal/intent`, kernel additions | Frozen | 53 |
+| 4 — Pipeline | `internal/pipeline`, `cmd/solvent` | Frozen | 10 |
 
-**Total: 85 tests, all passing.**
+**Total: 107 tests, all passing.**
 
 Frozen waves must not be modified. New work requires Technical Lead approval.
 

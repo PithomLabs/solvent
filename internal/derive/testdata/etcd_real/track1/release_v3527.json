@@ -1,8 +1,8 @@
 {
   "version": "v3.5.27",
   "tag": "v3.5.27",
-  "commit_sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
-  "released_at": "2026-03-15T12:00:00Z",
+  "commit_sha": "ee7ceab4e0ee88901cb46460579d1c22ee5ddb41",
+  "released_at": "2026-02-13T18:33:16Z",
   "prerelease": false,
   "assets": [
     "https://github.com/etcd-io/etcd/releases/download/v3.5.27/etcd-v3.5.27-linux-amd64.tar.gz"

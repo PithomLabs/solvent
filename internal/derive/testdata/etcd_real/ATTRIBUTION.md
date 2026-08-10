@@ -5,7 +5,7 @@
 ### GHSA-q8m4-xhhv-38mg (github_advisory)
 - **Source:** GitHub Security Advisories
 - **URL:** https://github.com/advisories/GHSA-q8m4-xhhv-38mg
-- **License:** Data is provided under the GitHub Advisory Database terms
+- **License:** Data is provided under the [GitHub Advisory Database terms](https://github.com/github/advisory-database/blob/main/LICENSE.md) (CC-BY-4.0)
 
 ### etcd v3.5.27 release (release)
 - **Source:** etcd-io/etcd GitHub Releases
@@ -26,5 +26,5 @@
 
 ### etcd v3.5 Data Inconsistency Postmortem (postmortem)
 - **Source:** etcd community documentation
-- **URL:** https://github.com/etcd-io/etcd/blob/main/Documentation/postmortems/v35-data-inconsistency.md
+- **URL:** https://github.com/etcd-io/etcd/blob/main/Documentation/postmortems/v3.5-data-inconsistency.md
 - **License:** Apache License 2.0

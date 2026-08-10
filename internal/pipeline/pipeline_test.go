@@ -698,3 +698,70 @@ func parsePGArray(s string) []string {
 	}
 	return strings.Split(s, ",")
 }
+
+func TestEndToEnd_RealFixtureTracks(t *testing.T) {
+	ctx := context.Background()
+
+	// Track 1: real vulnerability disclosure.
+	sc1 := "66666666-0000-0000-0000-000000000001"
+	track1Dir := deriveTestdataDir() + "/etcd_real/track1"
+	results1, err := pipeline.Run(ctx, shared, sc1, track1Dir)
+	if err != nil {
+		t.Fatalf("Track 1 Run: %v", err)
+	}
+	if len(results1) != 3 {
+		t.Fatalf("Track 1: expected 3 results, got %d", len(results1))
+	}
+
+	// Verify Track 1 beliefs.
+	track1Claims := make(map[string]bool)
+	for _, r := range results1 {
+		track1Claims[r.Normalized.Subject] = true
+		if r.BeliefID == "" {
+			t.Errorf("Track 1: empty belief ID for subject %q", r.Normalized.Subject)
+		}
+		if r.Promoted {
+			t.Errorf("Track 1: belief %q should not be promoted", r.Normalized.Subject)
+		}
+	}
+
+	// Track 2: historical retraction fixtures.
+	sc2 := "66666666-0000-0000-0000-000000000002"
+	track2Dir := deriveTestdataDir() + "/etcd_real/track2"
+	results2, err := pipeline.Run(ctx, shared, sc2, track2Dir)
+	if err != nil {
+		t.Fatalf("Track 2 Run: %v", err)
+	}
+	if len(results2) != 2 {
+		t.Fatalf("Track 2: expected 2 results, got %d", len(results2))
+	}
+
+	// Verify Track 2: postmortem has 6 debts (no debt retirement).
+	for _, r := range results2 {
+		if r.Normalized.SourceType == "postmortem" {
+			if len(r.DebtItems) != 6 {
+				t.Errorf("Track 2 postmortem: expected 6 debts, got %d (%v)", len(r.DebtItems), r.DebtItems)
+			}
+		}
+	}
+
+	// Verify scenario separation: Track 2 beliefs must not appear in Track 1.
+	track2Claims := make(map[string]bool)
+	for _, r := range results2 {
+		track2Claims[r.Normalized.Subject] = true
+	}
+	for subj := range track2Claims {
+		if track1Claims[subj] {
+			t.Errorf("scenario leak: Track 2 subject %q also in Track 1", subj)
+		}
+	}
+
+	// Verify no belief_edge writes.
+	var edgeCount int
+	if err := shared.QueryRowContext(ctx, "SELECT count(*) FROM belief_edge").Scan(&edgeCount); err != nil {
+		t.Fatalf("count belief_edge: %v", err)
+	}
+	if edgeCount != 0 {
+		t.Errorf("expected 0 belief_edge rows, got %d", edgeCount)
+	}
+}
