@@ -33,6 +33,10 @@ func Derive(evidence normalize.NormalizedEvidence) []DerivedBelief {
 		return deriveFromGitHubIssue(evidence)
 	case normalize.SourceGitHubPR:
 		return deriveFromGitHubPR(evidence)
+	case normalize.SourceGitHubAdvisory:
+		return deriveFromGitHubAdvisory(evidence)
+	case normalize.SourcePostmortem:
+		return deriveFromPostmortem(evidence)
 	default:
 		return nil
 	}
@@ -183,6 +187,54 @@ func deriveFromGitHubPR(evidence normalize.NormalizedEvidence) []DerivedBelief {
 		{
 			Claim:              "fix available for " + subject,
 			Classification:     Accommodated,
+			SupportingEvidence: []normalize.NormalizedEvidence{evidence},
+		},
+	}
+}
+
+func deriveFromGitHubAdvisory(evidence normalize.NormalizedEvidence) []DerivedBelief {
+	if !vulnPattern.MatchString(evidence.Assertion) {
+		return nil
+	}
+
+	subject := evidence.Subject
+	if subject == "" {
+		subject = "unknown product"
+	}
+
+	ghsaIDs := cvePattern.FindAllString(evidence.Assertion, -1)
+	if len(ghsaIDs) == 0 {
+		// Fall back to the GHSA ID from the assertion.
+		parts := strings.SplitN(evidence.Assertion, "vulnerable to ", 2)
+		if len(parts) < 2 || parts[1] == "" {
+			return nil
+		}
+		ghsaIDs = []string{parts[1]}
+	}
+
+	claim := subject + " is vulnerable to " + strings.Join(ghsaIDs, ", ")
+
+	return []DerivedBelief{
+		{
+			Claim:              claim,
+			Classification:     Derived,
+			SupportingEvidence: []normalize.NormalizedEvidence{evidence},
+		},
+	}
+}
+
+func deriveFromPostmortem(evidence normalize.NormalizedEvidence) []DerivedBelief {
+	subject := evidence.Subject
+	if subject == "" {
+		subject = "unknown product"
+	}
+
+	claim := subject + " has documented data inconsistency"
+
+	return []DerivedBelief{
+		{
+			Claim:              claim,
+			Classification:     Derived,
 			SupportingEvidence: []normalize.NormalizedEvidence{evidence},
 		},
 	}
