@@ -1,0 +1,56 @@
+version: '3'
+
+vars:
+  CONFIG: scripts/demo/config.env
+
+tasks:
+  setup:
+    desc: Start pinned CockroachDB in Docker, initialize schema, build binaries
+    cmds:
+      - bash scripts/demo/setup.sh
+
+  db:up:
+    desc: Start the CockroachDB container
+    cmds:
+      - docker start solvent-crdb 2>/dev/null || echo "Container not found; run 'task setup' first"
+
+  db:down:
+    desc: Stop the CockroachDB container
+    cmds:
+      - docker stop solvent-crdb 2>/dev/null || true
+
+  db:reset:
+    desc: Drop and recreate the fable database, reapply schema
+    cmds:
+      - docker exec solvent-crdb cockroach sql --insecure -e "DROP DATABASE IF EXISTS fable CASCADE; CREATE DATABASE fable;"
+      - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/001_schema.sql
+      - echo "Database reset complete."
+
+  demo:track1:
+    desc: Run the Track 1 vulnerability disclosure demo
+    cmds:
+      - bash scripts/demo/track1.sh
+
+  demo:replay:
+    desc: Prove deterministic replay creates no duplicates
+    cmds:
+      - bash scripts/demo/replay.sh
+
+  demo:track2:
+    desc: Run the Track 2 historical retraction demo
+    cmds:
+      - bash scripts/demo/track2.sh
+
+  inspect:
+    desc: Show a human-readable snapshot of the current ledger
+    cmds:
+      - bash scripts/demo/inspect.sh
+
+  test:
+    desc: Run the full verification suite
+    cmds:
+      - go test -count=1 -p 1 ./...
+      - go build ./...
+      - go vet ./...
+      - test -z "$(gofmt -l cmd internal)" || (echo "gofmt check failed" && exit 1)
+      - scripts/check_i7.sh
