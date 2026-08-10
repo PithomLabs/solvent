@@ -335,3 +335,53 @@ func TestDerive_NonMaintainerContradiction(t *testing.T) {
 		t.Errorf("expected 1 contradiction, got %d", len(belief.Contradicts))
 	}
 }
+
+func TestDeriveFromGitHubAdvisory(t *testing.T) {
+	evidence := normalize.NormalizedEvidence{
+		SourceType: normalize.SourceGitHubAdvisory,
+		Subject:    "go/go.etcd.io/etcd/v3 >=3.5.0, <3.5.28",
+		Assertion:  "vulnerable to GHSA-q8m4-xhhv-38mg",
+	}
+
+	results := Derive(evidence)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	belief := results[0]
+	if belief.Classification != Derived {
+		t.Errorf("classification = %q, want %q", belief.Classification, Derived)
+	}
+	want := "go/go.etcd.io/etcd/v3 >=3.5.0, <3.5.28 is vulnerable to GHSA-q8m4-xhhv-38mg"
+	if belief.Claim != want {
+		t.Errorf("claim = %q, want %q", belief.Claim, want)
+	}
+	if len(belief.SupportingEvidence) != 1 {
+		t.Errorf("expected 1 supporting evidence, got %d", len(belief.SupportingEvidence))
+	}
+}
+
+func TestDeriveFromPostmortem(t *testing.T) {
+	evidence := normalize.NormalizedEvidence{
+		SourceType: normalize.SourcePostmortem,
+		Subject:    "v3.5.0–v3.5.2",
+		Assertion:  "v3.5.0–v3.5.2 has documented data inconsistency",
+	}
+
+	results := Derive(evidence)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	belief := results[0]
+	if belief.Classification != Derived {
+		t.Errorf("classification = %q, want %q", belief.Classification, Derived)
+	}
+	want := "v3.5.0–v3.5.2 has documented data inconsistency"
+	if belief.Claim != want {
+		t.Errorf("claim = %q, want %q", belief.Claim, want)
+	}
+	if len(belief.SupportingEvidence) != 1 {
+		t.Errorf("expected 1 supporting evidence, got %d", len(belief.SupportingEvidence))
+	}
+}

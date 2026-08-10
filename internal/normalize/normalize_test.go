@@ -231,3 +231,108 @@ func TestNormalizeNegativeMissingFields(t *testing.T) {
 		t.Error("expected error for missing required fields in negative fixture, got nil")
 	}
 }
+
+func TestNormalizeGitHubAdvisory(t *testing.T) {
+	raw := loadFixture(t, "../../derive/testdata/etcd_real/track1/ghsa_advisory.json")
+	norm, err := Normalize(raw, SourceGitHubAdvisory)
+	if err != nil {
+		t.Fatalf("Normalize failed: %v", err)
+	}
+
+	if norm.SourceType != SourceGitHubAdvisory {
+		t.Errorf("SourceType = %q, want %q", norm.SourceType, SourceGitHubAdvisory)
+	}
+	if norm.SourceURL != "https://github.com/advisories/GHSA-q8m4-xhhv-38mg" {
+		t.Errorf("SourceURL = %q", norm.SourceURL)
+	}
+	if norm.Subject != "go/go.etcd.io/etcd/v3 >=3.5.0, <3.5.28" {
+		t.Errorf("Subject = %q", norm.Subject)
+	}
+	if norm.Assertion != "vulnerable to GHSA-q8m4-xhhv-38mg" {
+		t.Errorf("Assertion = %q", norm.Assertion)
+	}
+	if norm.Severity != SeverityHigh {
+		t.Errorf("Severity = %q, want %q", norm.Severity, SeverityHigh)
+	}
+	if norm.ContentSHA256 == "" {
+		t.Error("ContentSHA256 is empty")
+	}
+	if norm.ProvenanceClass != ProvenanceExternalFeed {
+		t.Errorf("ProvenanceClass = %q", norm.ProvenanceClass)
+	}
+	if norm.ObservedAt.IsZero() {
+		t.Error("ObservedAt is zero")
+	}
+}
+
+func TestNormalizeGitHubAdvisory_MissingFields(t *testing.T) {
+	cases := []struct {
+		name  string
+		json  string
+		field string
+	}{
+		{"missing ghsa_id", `{"summary":"x","severity":"high","published_at":"2026-01-01T00:00:00Z","affected":[]}`, "ghsa_id"},
+		{"missing summary", `{"ghsa_id":"GHSA-000","severity":"high","published_at":"2026-01-01T00:00:00Z","affected":[]}`, "summary"},
+		{"missing severity", `{"ghsa_id":"GHSA-000","summary":"x","published_at":"2026-01-01T00:00:00Z","affected":[]}`, "severity"},
+		{"missing published_at", `{"ghsa_id":"GHSA-000","summary":"x","severity":"high","affected":[]}`, "published_at"},
+		{"missing affected", `{"ghsa_id":"GHSA-000","summary":"x","severity":"high","published_at":"2026-01-01T00:00:00Z"}`, "affected"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Normalize([]byte(tc.json), SourceGitHubAdvisory)
+			if err == nil {
+				t.Errorf("expected error for %s, got nil", tc.field)
+			}
+		})
+	}
+}
+
+func TestNormalizePostmortem(t *testing.T) {
+	raw := loadFixture(t, "../../derive/testdata/etcd_real/track2/postmortem_v35.json")
+	norm, err := Normalize(raw, SourcePostmortem)
+	if err != nil {
+		t.Fatalf("Normalize failed: %v", err)
+	}
+
+	if norm.SourceType != SourcePostmortem {
+		t.Errorf("SourceType = %q, want %q", norm.SourceType, SourcePostmortem)
+	}
+	expectedURL := "https://github.com/etcd-io/etcd/blob/main/Documentation/postmortems/v3.5-data-inconsistency.md"
+	if norm.SourceURL != expectedURL {
+		t.Errorf("SourceURL = %q, want %q", norm.SourceURL, expectedURL)
+	}
+	if norm.Subject != "v3.5.0–v3.5.2" {
+		t.Errorf("Subject = %q", norm.Subject)
+	}
+	if norm.Assertion != "v3.5.0–v3.5.2 has documented data inconsistency" {
+		t.Errorf("Assertion = %q", norm.Assertion)
+	}
+	if norm.ContentSHA256 == "" {
+		t.Error("ContentSHA256 is empty")
+	}
+	if norm.ProvenanceClass != ProvenanceExternalFeed {
+		t.Errorf("ProvenanceClass = %q", norm.ProvenanceClass)
+	}
+}
+
+func TestNormalizePostmortem_MissingFields(t *testing.T) {
+	cases := []struct {
+		name  string
+		json  string
+		field string
+	}{
+		{"missing title", `{"affected_versions":"v3.5.x","summary":"x","published_at":"2022-01-01T00:00:00Z","source_url":"http://example.com"}`, "title"},
+		{"missing affected_versions", `{"title":"x","summary":"x","published_at":"2022-01-01T00:00:00Z","source_url":"http://example.com"}`, "affected_versions"},
+		{"missing summary", `{"title":"x","affected_versions":"v3.5.x","published_at":"2022-01-01T00:00:00Z","source_url":"http://example.com"}`, "summary"},
+		{"missing published_at", `{"title":"x","affected_versions":"v3.5.x","summary":"x","source_url":"http://example.com"}`, "published_at"},
+		{"missing source_url", `{"title":"x","affected_versions":"v3.5.x","summary":"x","published_at":"2022-01-01T00:00:00Z"}`, "source_url"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Normalize([]byte(tc.json), SourcePostmortem)
+			if err == nil {
+				t.Errorf("expected error for %s, got nil", tc.field)
+			}
+		})
+	}
+}

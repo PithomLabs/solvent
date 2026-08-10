@@ -1,11 +1,9 @@
 // Package pipeline is the minimum integration layer for Wave 4.
 //
-// It chains normalize → derive → belief.Process → ProposeIfNew → intent.Audit
-// into a single pass over evidence fixtures. The kernel owns correctness;
-// this package is a thin orchestrator.
-//
-// Intent proposal is replay-idempotent under sequential execution;
-// concurrent duplicate-intent prevention is deferred.
+// It chains normalize → derive → belief.Process → intent.Audit into a single
+// pass over evidence fixtures. The kernel owns correctness; this package is a
+// thin orchestrator. Intent creation is not a pipeline step — it is an
+// explicit operator action via cmd/operator-review.
 package pipeline
 
 import (

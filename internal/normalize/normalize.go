@@ -532,7 +532,7 @@ func normalizeGitHubAdvisory(raw []byte) (NormalizedEvidence, error) {
 		ProvenanceClass: ProvenanceExternalFeed,
 		Subject:         subject,
 		Assertion:       assertion,
-		Severity:        classifySeverity(g.Summary, ""),
+		Severity:        normalizeAdvisorySeverity(g.Severity, g.Summary),
 	}
 
 	type hashable struct {
@@ -704,6 +704,26 @@ var (
 	severityMedium   = regexp.MustCompile(`\b(medium|moderate)\b`)
 	severityLow      = regexp.MustCompile(`\b(low|minor)\b`)
 )
+
+// normalizeAdvisorySeverity maps the advisory's authoritative severity field
+// through the existing Severity* constants. Falls back to classifySeverity only
+// when the field is absent or unrecognized.
+func normalizeAdvisorySeverity(raw, summary string) string {
+	switch strings.ToLower(raw) {
+	case "critical":
+		return SeverityCritical
+	case "high":
+		return SeverityHigh
+	case "medium":
+		return SeverityMedium
+	case "low":
+		return SeverityLow
+	case "info":
+		return SeverityInfo
+	default:
+		return classifySeverity(summary, "")
+	}
+}
 
 func classifySeverity(title, body string) string {
 	combined := strings.ToLower(title + " " + body)
