@@ -137,8 +137,8 @@ func TestEndToEnd_ProcessRealFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QueryIntentCount: %v", err)
 	}
-	if intentCount != 1 {
-		t.Errorf("expected 1 live intent, got %d", intentCount)
+	if intentCount != 0 {
+		t.Errorf("expected 0 live intents (pipeline does not create intents), got %d", intentCount)
 	}
 
 	// Record for idempotency check.

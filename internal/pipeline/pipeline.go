@@ -51,6 +51,11 @@ var sourceTypeMap = map[string]string{
 	"contradicting_evidence.json":   normalize.SourceMaintainerComment,
 	"non_maintainer_comment.json":   normalize.SourceMaintainerComment,
 	"unmerged_pr.json":              normalize.SourceGitHubPR,
+	"ghsa_advisory.json":            normalize.SourceGitHubAdvisory,
+	"release_v3527.json":            normalize.SourceRelease,
+	"release_v3528.json":            normalize.SourceRelease,
+	"release_v350.json":             normalize.SourceRelease,
+	"postmortem_v35.json":           normalize.SourcePostmortem,
 }
 
 // ProcessEvidence chains normalize → derive → belief.Process for one raw evidence item.
@@ -346,17 +351,6 @@ func Run(ctx context.Context, db *sql.DB, scenarioID string, fixtureDir string) 
 			DebtItems:  debtItems,
 			Beliefs:    []derive.DerivedBelief{d},
 		})
-	}
-
-	// Phase 3.5: propose intents for promoted beliefs.
-	for i := range allResults {
-		r := &allResults[i]
-		if r.Promoted && r.BeliefID != "" {
-			if err := ProposeIfNew(ctx, db, scenarioID, r.BeliefID, "upgrade"); err != nil {
-				return nil, fmt.Errorf("pipeline: propose intent: %w", err)
-			}
-			r.IntentState = "live"
-		}
 	}
 
 	// Phase 4: record contradictions with warning (F1). No ledger mutation.

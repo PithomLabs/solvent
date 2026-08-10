@@ -30,6 +30,8 @@ const (
 	SourceMaintainerComment = "maintainer_comment"
 	SourceRelease           = "release"
 	SourceKEVEntry          = "kev_entry"
+	SourceGitHubAdvisory    = "github_advisory"
+	SourcePostmortem        = "postmortem"
 )
 
 // Severity constants.
