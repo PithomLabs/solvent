@@ -58,6 +58,90 @@ task test
 
 107 tests plus static analysis. All must pass.
 
+## MCP Server
+
+The MCP (Model Context Protocol) server exposes the Solvent ledger as six tools over stdio. It demonstrates that an AI agent cannot bypass Solvent's transactional safety gates — the database, not the agent, decides whether an action is allowed.
+
+### Trust Boundary
+
+```
+Agent (reasoning, proposal, narration)
+   ↓  NOT TRUSTED
+MCP adapter (unmarshal → kernel call → format)
+   ↓  NOT TRUSTED
+Solvent kernel (crdb.ExecuteTx on every write)
+   ↓  SQLSTATE classification
+CockroachDB
+   CHECK  promoted_is_debt_free   (I-1)
+   FK     gate                    (I-3)
+   CHECK  live_requires_promoted  (I-4)
+   TRANSACTION                    (I-8)
+   ↓
+FINAL AUTHORITY
+```
+
+### Build and Seed
+
+```bash
+# Build the MCP server binary
+task mcp:build
+
+# Seed Track 2 baseline (requires CockroachDB running via task setup)
+task mcp:seed
+```
+
+### Client Configuration
+
+`.mcp.json` at the repo root configures a local MCP client:
+
+```json
+{
+  "mcpServers": {
+    "solvent": {
+      "command": "bin/solvent-mcp",
+      "env": {
+        "FABLE_DSN": "postgresql://root@localhost:26260/fable?sslmode=disable",
+        "SOLVENT_FIXTURE_ROOT": "internal/derive/testdata/etcd_real"
+      }
+    }
+  }
+}
+```
+
+The server communicates over stdin/stdout (stdio transport).
+
+### Six Tools
+
+| Tool | Description |
+|---|---|
+| `solvent_ledger` | Read beliefs, evidence, intents, and audit count for a scenario |
+| `solvent_ingest_evidence` | Process pinned evidence fixtures through the full pipeline |
+| `solvent_retire_debt` | Discharge one review obligation on a belief |
+| `solvent_promote` | Promote a belief to authorized status (database enforces debt-free) |
+| `solvent_authorize_action` | Record a live intent citing a promoted belief as warrant |
+| `solvent_falsify` | Retract a belief and cancel its dependent live intent |
+
+### Database Refusals
+
+The two mandatory demonstrations:
+
+**M1 — Promotion refused** (SQLSTATE `23514`, constraint `promoted_is_debt_free`): The database refuses to promote a belief that carries open debt. The refusal text is CockroachDB's own rendering of the CHECK expression.
+
+**M2 — Authorization refused** (SQLSTATE `23503`, constraint `gate`): The database refuses to attach a live intent to a non-promoted belief. The refusal text is CockroachDB's own FK violation.
+
+### Track 2 Sequence
+
+```
+seed → ledger → promotion refusal → authorization refusal
+  → retire debts (×6) → promote → authorize → ingest evidence
+  → falsify → observe intent cancelled
+```
+
+### Limitations
+
+- Retraction is currently **single-belief** — `belief_edge` is not populated, so there is no multi-hop cascade.
+- The MCP layer is a thin adapter. It contains no Solvent business logic — no status checks, no debt inspection, no promotion decisions.
+
 ## How It Works
 
 ```
