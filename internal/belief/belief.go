@@ -61,7 +61,11 @@ func Process(ctx context.Context, db *sql.DB, scenarioID string, b derive.Derive
 
 	// Step 2: Attach supporting evidence (deduplicated by content_sha256).
 	for _, e := range b.SupportingEvidence {
-		if evidenceExists(ctx, db, beliefID, e.ContentSHA256) {
+		exists, err := evidenceExists(ctx, db, beliefID, e.ContentSHA256)
+		if err != nil {
+			return fmt.Errorf("belief.Process: check evidence exists: %w", err)
+		}
+		if exists {
 			continue
 		}
 		if err := st.AddEvidence(ctx, scenarioID, beliefID,
@@ -96,10 +100,13 @@ func Process(ctx context.Context, db *sql.DB, scenarioID string, b derive.Derive
 
 // evidenceExists checks if evidence with the given content_sha256 already exists
 // for this belief. TOCTOU window accepted for MVP (see wave3_qa.md).
-func evidenceExists(ctx context.Context, db *sql.DB, beliefID, contentSHA256 string) bool {
+func evidenceExists(ctx context.Context, db *sql.DB, beliefID, contentSHA256 string) (bool, error) {
 	var count int
-	_ = db.QueryRowContext(ctx,
+	err := db.QueryRowContext(ctx,
 		`SELECT count(*) FROM evidence WHERE belief_id=$1::UUID AND content_sha256=$2`,
 		beliefID, contentSHA256).Scan(&count)
-	return count > 0
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }

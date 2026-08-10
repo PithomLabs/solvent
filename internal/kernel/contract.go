@@ -21,6 +21,7 @@ type Contract interface {
 	IntentOnPromoted(context.Context, string, string, string) error
 	RetractCascade(context.Context, string, string) (int, error)
 	AuditLiveOnNonPromoted(context.Context, string) (int, error)
+	EnsureBelief(context.Context, string, string, ClaimType) (string, error)
 }
 
 var (

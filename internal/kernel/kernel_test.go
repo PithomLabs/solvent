@@ -808,7 +808,7 @@ func TestW3_B15_I7_StaticGate(t *testing.T) {
 	rec.check(t, true, Case{
 		ID: "B-15", Wave: "3",
 		Purpose:   "I-7 — every kernel write goes through crdb.ExecuteTx",
-		Expected:  "asserted statically: 6 ExecuteTx write sites, 0 raw writes",
+		Expected:  "asserted statically: 7 ExecuteTx write sites, 0 raw writes",
 		Observed:  "NOT runtime-executable; asserted by scripts/check_i7.sh, run by scripts/m2_accept.sh before this suite — see docs/M1_I7.md",
 		Invariant: "I-7 — no raw db.Exec/db.Query writes",
 	})

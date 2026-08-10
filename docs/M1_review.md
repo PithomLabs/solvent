@@ -10,7 +10,7 @@ M1 achieved exactly what it promised:
 
 > **Transform the frozen contract into a compiling kernel without claiming behavioral correctness.**
 
-That distinction is maintained consistently throughout the implementation and the report. The deliverables all satisfy the planned acceptance criteria: successful build/vet/format, I-7 enforcement, PREPARE validation, and all seven contract functions implemented with no remaining new blockers. :contentReference[oaicite:0]{index=0} :contentReference[oaicite:1]{index=1}
+That distinction is maintained consistently throughout the implementation and the report. The deliverables all satisfy the planned acceptance criteria: successful build/vet/format, I-7 enforcement, PREPARE validation, and all eight contract functions implemented with no remaining new blockers. :contentReference[oaicite:0]{index=0} :contentReference[oaicite:1]{index=1}
 
 ---
 
@@ -95,7 +95,7 @@ That significantly increases confidence in the verifier itself. :contentReferenc
 
 ✅ PASS
 
-All seven contract functions now exist.
+All eight contract functions now exist.
 
 No stub remains.
 

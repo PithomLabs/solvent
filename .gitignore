@@ -12,6 +12,9 @@
 *.so
 *.dylib
 
+# Extensionless Linux binaries (e.g. `go build ./cmd/solvent`)
+/solvent
+
 # Test binary, built with `go test -c`
 *.test
 

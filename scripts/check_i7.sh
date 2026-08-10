@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 
 PKG="${I7_PKG:-internal/kernel}"
 OUT="${I7_OUT:-docs/M1_I7.md}"
-EXPECT_TX=6   # Enter, AddEvidence, RetireDebt, Promote, IntentOnPromoted, RetractCascade
+EXPECT_TX=7   # Enter, AddEvidence, RetireDebt, Promote, IntentOnPromoted, RetractCascade, EnsureBelief
 
 fail() {
   echo "I-7 FAIL"
