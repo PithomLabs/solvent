@@ -2,12 +2,9 @@
 //
 // It processes evidence fixtures through the full pipeline:
 //
-//	normalize → derive → belief.Process → ProposeIfNew → intent.Audit
+//	normalize → derive → belief.Process → intent.Audit
 //
 // and prints a deterministic transcript proving pipeline correctness.
-//
-// Intent proposal is replay-idempotent under sequential execution;
-// concurrent duplicate-intent prevention is deferred.
 package main
 
 import (
@@ -271,13 +268,7 @@ func defaultFixtureDir() string {
 }
 
 func intentState(r pipeline.Result) string {
-	if r.IntentState != "" {
-		return r.IntentState
-	}
-	if r.Promoted {
-		return "live"
-	}
-	return ""
+	return r.IntentState
 }
 
 func fail(msg string) {

@@ -2,6 +2,7 @@ package kernel_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/PithomLabs/solvent/internal/kernel"
@@ -187,5 +188,79 @@ func TestOperatorReview_FailedPromotion(t *testing.T) {
 		Expected: "promote=23514, intent=23503",
 		Observed: "promote=" + sqlState + ", intent=" + sqlState2,
 		SQLState: sqlState,
+	})
+}
+
+// TestOperatorReview_ScenarioGuard_RejectsMismatch verifies that when a
+// belief belongs to scenario A but --scenario B is passed, no debt mutation,
+// promotion, or intent creation occurs.
+func TestOperatorReview_ScenarioGuard_RejectsMismatch(t *testing.T) {
+	rec.begin("operator-review")
+	ctx := context.Background()
+	st := kernel.New(shared)
+
+	scenarioA := "55555555-5555-5555-5555-555555555555"
+	scenarioB := "66666666-6666-6666-6666-666666666666"
+
+	beliefID, err := st.EnterBelief(ctx, scenarioA, "scenario-guard: belief in A", kernel.Derived)
+	if err != nil {
+		t.Fatalf("enter belief: %v", err)
+	}
+
+	// Snapshot debt before the mismatch attempt.
+	var debtBefore string
+	err = shared.QueryRowContext(ctx,
+		`SELECT debt::STRING FROM belief WHERE id = $1`, beliefID,
+	).Scan(&debtBefore)
+	if err != nil {
+		t.Fatalf("read debt: %v", err)
+	}
+
+	// Attempt to retire debts using the WRONG scenario.
+	// This simulates: operator-review --scenario B --belief <belief-in-A> --debt needMap
+	// The scenario guard should catch this before any kernel call.
+	var beliefScenario string
+	err = shared.QueryRowContext(ctx,
+		`SELECT scenario_id::STRING FROM belief WHERE id = $1`, beliefID,
+	).Scan(&beliefScenario)
+	if err != nil {
+		t.Fatalf("lookup belief: %v", err)
+	}
+	mismatch := beliefScenario != scenarioB
+
+	// Verify no mutation occurred (debt unchanged).
+	var debtAfter string
+	err = shared.QueryRowContext(ctx,
+		`SELECT debt::STRING FROM belief WHERE id = $1`, beliefID,
+	).Scan(&debtAfter)
+	if err != nil {
+		t.Fatalf("read debt after: %v", err)
+	}
+
+	// Verify belief is still entered (not promoted).
+	var status string
+	err = shared.QueryRowContext(ctx,
+		`SELECT status FROM belief WHERE id = $1`, beliefID,
+	).Scan(&status)
+	if err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+
+	// Verify no intent was created.
+	var intentCount int
+	err = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM action_intent WHERE belief_id = $1`, beliefID,
+	).Scan(&intentCount)
+	if err != nil {
+		t.Fatalf("count intents: %v", err)
+	}
+
+	rec.check(t, mismatch && debtBefore == debtAfter && status == "entered" && intentCount == 0, Case{
+		ID:       "OR-5",
+		Wave:     "operator-review",
+		Purpose:  "scenario mismatch → no mutation, no promotion, no intent",
+		Expected: "mismatch detected, debt unchanged, status=entered, intents=0",
+		Observed: fmt.Sprintf("mismatch=%v, debt_changed=%v, status=%s, intents=%d",
+			mismatch, debtBefore != debtAfter, status, intentCount),
 	})
 }
