@@ -46,6 +46,26 @@ tasks:
     cmds:
       - bash scripts/demo/inspect.sh
 
+  mcp:build:
+    desc: Build the MCP server binary
+    cmds:
+      - go build -o bin/solvent-mcp ./cmd/solvent-mcp
+
+  mcp:seed:
+    desc: Seed the Track 2 baseline belief for MCP demo
+    dotenv:
+      - scripts/demo/config.env
+    cmds:
+      - task db:reset
+      - >
+        go run ./cmd/operator-review --dsn "$SOLVENT_DSN"
+        --scenario 00000000-0000-0000-0000-000000000002
+        --enter-claim "etcd v3.5.0 is approved for production deployment (decision as of 2021-06-16)"
+        --claim-type postulated
+        --evidence-url "https://github.com/etcd-io/etcd/releases/tag/v3.5.0"
+        --evidence-sha f47656dfaad45b2ecdb32c3169b8897b153d7a8b2453ba8e7c34a2dcde609ce1
+      - echo "Seed complete. Post-seed state - 1 belief (postulated, entered, 6 debts), 1 evidence, 0 intents, audit 0."
+
   test:
     desc: Run the full verification suite
     cmds:
@@ -54,3 +74,19 @@ tasks:
       - go vet ./...
       - test -z "$(gofmt -l cmd internal)" || (echo "gofmt check failed" && exit 1)
       - scripts/check_i7.sh
+      # I-7 MCP boundary — no direct writes in cmd/solvent-mcp or internal/view
+      - |
+        for d in cmd/solvent-mcp internal/view; do
+          [ -d "$d" ] || { echo "FAIL: $d missing"; exit 1; }
+        done
+        # Stage 1: reject write/transaction entry points
+        if grep -rnE --include='*.go' '\.(Exec|ExecContext|Prepare|PrepareContext|Begin|BeginTx)\(' cmd/solvent-mcp internal/view; then
+          echo "FAIL: direct write/transaction call in MCP/view"
+          exit 1
+        fi
+        # Stage 2: reject write SQL text (case-insensitive, SQL-shaped)
+        if grep -rniE --include='*.go' '(INSERT[[:space:]]+INTO|UPDATE[[:space:]]+[a-z_]+[[:space:]]+SET|DELETE[[:space:]]+FROM|CREATE[[:space:]]+(TABLE|INDEX|DATABASE)|DROP[[:space:]]+(TABLE|INDEX|DATABASE))' cmd/solvent-mcp internal/view; then
+          echo "FAIL: write SQL text in MCP/view"
+          exit 1
+        fi
+        echo "I-7 MCP boundary: PASS"
