@@ -2,6 +2,7 @@ package normalize
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -104,14 +105,35 @@ func TestNormalizeRelease(t *testing.T) {
 	if norm.SourceType != SourceRelease {
 		t.Errorf("SourceType = %q, want %q", norm.SourceType, SourceRelease)
 	}
-	if norm.Subject != "etcd v3.5.15" {
-		t.Errorf("Subject = %q, want %q", norm.Subject, "etcd v3.5.15")
+	if norm.Subject != "etcd-io/etcd v3.5.15" {
+		t.Errorf("Subject = %q, want %q", norm.Subject, "etcd-io/etcd v3.5.15")
 	}
 	if norm.ContentSHA256 == "" {
 		t.Error("ContentSHA256 is empty")
 	}
 	if norm.DomainPayload == nil {
 		t.Error("DomainPayload is nil")
+	}
+}
+
+func TestNormalizeRelease_NonEtcd(t *testing.T) {
+	raw := []byte(`{
+		"version": "1.2.3",
+		"tag": "v1.2.3",
+		"commit_sha": "abc123",
+		"released_at": "2024-01-01T00:00:00Z",
+		"prerelease": false,
+		"assets": ["https://github.com/example/project/releases/download/v1.2.3/bin.tar.gz"]
+	}`)
+	norm, err := Normalize(raw, SourceRelease)
+	if err != nil {
+		t.Fatalf("Normalize failed: %v", err)
+	}
+	if strings.Contains(norm.SourceURL, "etcd") {
+		t.Errorf("SourceURL should not contain etcd for non-etcd release: %s", norm.SourceURL)
+	}
+	if strings.Contains(norm.Subject, "etcd") {
+		t.Errorf("Subject should not contain etcd for non-etcd release: %s", norm.Subject)
 	}
 }
 

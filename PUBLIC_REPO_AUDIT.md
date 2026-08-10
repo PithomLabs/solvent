@@ -87,7 +87,7 @@ One documentation discrepancy found and fixed (AGENTS.md missing `belief_edge` t
 
 ## 5. Test Count
 
-**Actual:** 84 tests, verified by running each package:
+**Actual:** 85 tests, verified by running each package:
 
 | Package | File | Tests |
 |---|---|---|
@@ -95,14 +95,14 @@ One documentation discrepancy found and fixed (AGENTS.md missing `belief_edge` t
 | belief | `internal/belief/belief_test.go` | 13 |
 | belief | `internal/belief/integration_test.go` | 5 |
 | derive | `internal/derive/derive_test.go` | 16 |
-| normalize | `internal/normalize/normalize_test.go` | 11 |
+| normalize | `internal/normalize/normalize_test.go` | 12 |
 | intent | `internal/intent/intent_test.go` | 3 |
 | pipeline | `internal/pipeline/pipeline_test.go` | 9 |
-| **Total** | | **84** |
+| **Total** | | **85** |
 
 **Documentation status:**
-- AGENTS.md: Correct — "84 tests, all passing"
-- README.md: Correct — "84 tests, all passing"
+- AGENTS.md: Correct — "85 tests, all passing"
+- README.md: Correct — "85 tests, all passing"
 
 ---
 

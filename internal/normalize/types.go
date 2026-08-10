@@ -25,11 +25,11 @@ type NormalizedEvidence struct {
 
 // Source type constants. These identify the upstream category.
 const (
-	SourceGitHubIssue      = "github_issue"
-	SourceGitHubPR         = "github_pr"
+	SourceGitHubIssue       = "github_issue"
+	SourceGitHubPR          = "github_pr"
 	SourceMaintainerComment = "maintainer_comment"
-	SourceRelease          = "release"
-	SourceKEVEntry         = "kev_entry"
+	SourceRelease           = "release"
+	SourceKEVEntry          = "kev_entry"
 )
 
 // Severity constants.
