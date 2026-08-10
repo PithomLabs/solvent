@@ -45,7 +45,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "M1 PREPARE SWEEP SKIPPED — this does NOT count as green (M1-R9).")
 		fmt.Fprintln(os.Stderr, "  criterion: all catalog statements prepare against a schema-applied database")
 		fmt.Fprintln(os.Stderr, "  observed:  sweep skipped by explicit --skip")
-		fmt.Fprintln(os.Stderr, "  expected:  8 statements prepared")
+		fmt.Fprintln(os.Stderr, "  expected:  9 statements prepared")
 		os.Exit(2)
 	}
 	if *dsn == "" {

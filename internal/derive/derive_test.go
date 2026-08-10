@@ -9,10 +9,10 @@ import (
 
 func TestDerive_VulnerabilityAdvisory(t *testing.T) {
 	evidence := normalize.NormalizedEvidence{
-		SourceType:  normalize.SourceKEVEntry,
-		Subject:     "etcd v3.5.x, v3.5.x before v3.5.15",
-		Assertion:   "etcd is vulnerable to CVE-2024-24790",
-		IngestedAt:  time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC),
+		SourceType: normalize.SourceKEVEntry,
+		Subject:    "etcd v3.5.x, v3.5.x before v3.5.15",
+		Assertion:  "etcd is vulnerable to CVE-2024-24790",
+		IngestedAt: time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC),
 	}
 
 	results := Derive(evidence)
@@ -113,10 +113,10 @@ func TestDerive_Contradiction(t *testing.T) {
 
 func TestDerive_Determinism(t *testing.T) {
 	evidence := normalize.NormalizedEvidence{
-		SourceType:  normalize.SourceKEVEntry,
-		Subject:     "etcd v3.5.x, v3.5.x before v3.5.15",
-		Assertion:   "etcd is vulnerable to CVE-2024-24790",
-		IngestedAt:  time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC),
+		SourceType: normalize.SourceKEVEntry,
+		Subject:    "etcd v3.5.x, v3.5.x before v3.5.15",
+		Assertion:  "etcd is vulnerable to CVE-2024-24790",
+		IngestedAt: time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC),
 	}
 
 	first := Derive(evidence)
@@ -138,10 +138,10 @@ func TestDerive_Determinism(t *testing.T) {
 
 func TestDerive_ClaimFormat(t *testing.T) {
 	evidence := normalize.NormalizedEvidence{
-		SourceType:  normalize.SourceKEVEntry,
-		Subject:     "etcd v3.5.x, v3.5.x before v3.5.15",
-		Assertion:   "etcd is vulnerable to CVE-2024-24790",
-		IngestedAt:  time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC),
+		SourceType: normalize.SourceKEVEntry,
+		Subject:    "etcd v3.5.x, v3.5.x before v3.5.15",
+		Assertion:  "etcd is vulnerable to CVE-2024-24790",
+		IngestedAt: time.Date(2024, 6, 10, 12, 0, 0, 0, time.UTC),
 	}
 
 	results := Derive(evidence)
@@ -286,10 +286,10 @@ func TestDerive_MalformedPayload(t *testing.T) {
 // F4: nil DomainPayload → nil (explicit fail-on-invalid).
 func TestDerive_NilPayload(t *testing.T) {
 	evidence := normalize.NormalizedEvidence{
-		SourceType:  normalize.SourceMaintainerComment,
-		Subject:     "etcd-io/etcd",
-		Assertion:   "Fixed in v3.5.15",
-		IngestedAt:  time.Date(2024, 6, 12, 10, 0, 0, 0, time.UTC),
+		SourceType: normalize.SourceMaintainerComment,
+		Subject:    "etcd-io/etcd",
+		Assertion:  "Fixed in v3.5.15",
+		IngestedAt: time.Date(2024, 6, 12, 10, 0, 0, 0, time.UTC),
 	}
 
 	results := Derive(evidence)
@@ -301,10 +301,10 @@ func TestDerive_NilPayload(t *testing.T) {
 // F3: release assertion must contain "release" keyword.
 func TestDerive_ReleaseWithoutKeyword(t *testing.T) {
 	evidence := normalize.NormalizedEvidence{
-		SourceType:  normalize.SourceRelease,
-		Subject:     "etcd v3.5.15",
-		Assertion:   "published etcd v3.5.15",
-		IngestedAt:  time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC),
+		SourceType: normalize.SourceRelease,
+		Subject:    "etcd v3.5.15",
+		Assertion:  "published etcd v3.5.15",
+		IngestedAt: time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC),
 	}
 
 	results := Derive(evidence)

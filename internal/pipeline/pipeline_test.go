@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/PithomLabs/solvent/internal/kernel"
@@ -158,7 +159,7 @@ func TestEndToEnd_ProcessRealFixtures(t *testing.T) {
 	}
 
 	beliefCount2, _ := pipeline.QueryBeliefCount(ctx, shared, sc)
-	_, status2, debtLen2, _ := queryBeliefState(ctx, shared, sc)
+	_, status2, debtItems2, _ := queryBeliefState(ctx, shared, sc)
 	evidenceCount2, _ := pipeline.QueryEvidenceCount(ctx, shared, sc)
 	auditCount2, _ := pipeline.AuditIntent(ctx, shared, sc)
 	intentCount2, _ := pipeline.QueryIntentCount(ctx, shared, sc)
@@ -169,8 +170,8 @@ func TestEndToEnd_ProcessRealFixtures(t *testing.T) {
 	if status2 != savedStatus {
 		t.Errorf("replay status: expected %q, got %q", savedStatus, status2)
 	}
-	if debtLen2 != savedDebtLen {
-		t.Errorf("replay debt len: expected %d, got %d", savedDebtLen, debtLen2)
+	if len(debtItems2) != savedDebtLen {
+		t.Errorf("replay debt len: expected %d, got %d", savedDebtLen, len(debtItems2))
 	}
 	if evidenceCount2 != savedEvidenceCount {
 		t.Errorf("replay evidence count: expected %d, got %d", savedEvidenceCount, evidenceCount2)
@@ -204,15 +205,20 @@ func TestEndToEnd_PartialDebtBlocksPromotion(t *testing.T) {
 	}
 
 	// Query state.
-	_, status, debtLen, err := queryBeliefState(ctx, shared, sc)
+	_, status, debtItems, err := queryBeliefState(ctx, shared, sc)
 	if err != nil {
 		t.Fatalf("queryBeliefState: %v", err)
 	}
 	if status != "entered" {
 		t.Errorf("expected status 'entered', got %q", status)
 	}
-	if debtLen == 0 {
+	if len(debtItems) == 0 {
 		t.Error("expected non-zero debt items, got 0")
+	}
+	for i, item := range debtItems {
+		if item == "" {
+			t.Errorf("debtItems[%d] is empty; expected actual debt identifier", i)
+		}
 	}
 
 	// Intent on unpromoted should fail.
@@ -344,10 +350,10 @@ func assertDeterministicState(t *testing.T, ctx context.Context, scA, scB string
 	}
 
 	// Debt len.
-	_, _, debtA, _ := queryBeliefState(ctx, shared, scA)
-	_, _, debtB, _ := queryBeliefState(ctx, shared, scB)
-	if debtA != debtB {
-		t.Errorf("debt len: A=%d B=%d", debtA, debtB)
+	_, _, debtItemsA, _ := queryBeliefState(ctx, shared, scA)
+	_, _, debtItemsB, _ := queryBeliefState(ctx, shared, scB)
+	if len(debtItemsA) != len(debtItemsB) {
+		t.Errorf("debt len: A=%d B=%d", len(debtItemsA), len(debtItemsB))
 	}
 
 	// Evidence count.
@@ -665,15 +671,30 @@ func TestEndToEnd_DeterministicOrderWithMultipleClaims(t *testing.T) {
 	}
 }
 
-func queryBeliefState(ctx context.Context, db *sql.DB, scenarioID string) (id, status string, debtLen int, err error) {
+func queryBeliefState(ctx context.Context, db *sql.DB, scenarioID string) (id, status string, debtItems []string, err error) {
+	var debtRaw string
 	err = db.QueryRowContext(ctx,
-		`SELECT id, status, coalesce(array_length(debt,1),0)
-		 FROM belief WHERE scenario_id=$1::UUID`, scenarioID).Scan(&id, &status, &debtLen)
+		`SELECT id, status, debt::STRING
+		 FROM belief WHERE scenario_id=$1::UUID`, scenarioID).Scan(&id, &status, &debtRaw)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", "", 0, nil
+			return "", "", nil, nil
 		}
-		return "", "", 0, err
+		return "", "", nil, err
 	}
-	return id, status, debtLen, nil
+	debtItems = parsePGArray(debtRaw)
+	return id, status, debtItems, nil
+}
+
+func parsePGArray(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "{}" {
+		return []string{}
+	}
+	s = strings.TrimPrefix(s, "{")
+	s = strings.TrimSuffix(s, "}")
+	if s == "" {
+		return []string{}
+	}
+	return strings.Split(s, ",")
 }

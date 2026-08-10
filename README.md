@@ -31,8 +31,8 @@ One sentence for humans: *beliefs enter free; actions cost promotion; the gate i
 - **I-4** A belief with a live intent cannot become `retracted` until that intent is cancelled.
   (composite FK `ON UPDATE CASCADE` propagates status into the intent, then the CHECK fires)
 - **I-5** `AuditLiveOnNonPromoted` returns 0 in every committed state.
-- **I-6** Every invariant holds with all `embedding` columns NULL. Vectors are an optimization,
-  never part of belief semantics.
+- **I-6** Every invariant holds with zero vectors. There is no embedding column; the ledger
+  is fully correct without one.
 - **I-7** Every kernel write goes through `crdb.ExecuteTx`. No raw `db.Exec`/`db.Query` writes.
 - **I-8** `RetractCascade` is a single transaction; cancel-before-retract ordering is mandatory.
 
@@ -59,7 +59,7 @@ that the gate is structural; keep it structural.
 - **Kernel:** `internal/kernel` (package `kernel`). Public surface, behaviour only:
   `New`, `EnterBelief`, `AddEvidence`, `RetireDebt`, `Promote` (→ `ErrPromotionBlocked`),
   `IntentOnPromoted` (→ `ErrActionOnUnpromoted`), `RetractCascade`, `AuditLiveOnNonPromoted`,
-  plus `FullDebt` and the `ClaimType` constants. This package must not import demo/domain code.
+  `EnsureBelief`, plus `FullDebt` and the `ClaimType` constants. This package must not import demo/domain code.
 - **Pipeline:** `internal/pipeline` chains normalize → derive → belief.Process → ProposeIfNew
   into a single pass over evidence fixtures. Evidence aggregation is CVE-aware: each distinct
   CVE-bearing claim remains independent; non-CVE supporting evidence merges into the matching
@@ -68,10 +68,9 @@ that the gate is structural; keep it structural.
 - **CLI:** `cmd/solvent` is the demo entry point. It runs the full pipeline against local JSON
   fixtures and prints a deterministic transcript with source provenance, belief state, and audit.
 - **Substrate:** CockroachDB. `cockroach-go/v2` (`crdb.ExecuteTx`).
-- **Agents (thin):** a *claim agent* (ingest evidence → enter/type claims → retire debt →
-  merge duplicates by vector similarity before insert) and a *security agent* (read promoted
-  beliefs → write intents). Keep them dumb; the memory layer is the intelligence. The pipeline
-  serves as the integration layer for the MVP demo.
+- **Agents (thin):** a *claim agent* (ingest evidence → enter/type claims → retire debt) and a
+  *security agent* (read promoted beliefs → write intents). Keep them dumb; the memory layer
+  is the intelligence. The pipeline serves as the integration layer for the MVP demo.
 
 ## Go + CockroachDB conventions
 
@@ -88,8 +87,9 @@ that the gate is structural; keep it structural.
   If a UI needs a legibility signal, derive it (e.g. count of open debt); never persist a scalar.
 - **The cascade is one transaction:** recursive walk of `belief_edge` from the root, cancel live
   intents on all descendants, then un-promote them — in that order, in a single `ExecuteTx`.
-- **Vector column is nullable and used for merge-not-fork** (dedup on write), not retrieval.
-  The ledger must be fully correct with it NULL (I-6).
+- **No embedding column.** The current MVP has no vector/embedding column on `belief`, by
+  ratified design decision (F3). The ledger is fully correct with zero vectors (I-6). Vector
+  similarity dedup is deferred to Phase 2.
 
 ## Hard boundaries (do not cross without escalation)
 
@@ -97,7 +97,7 @@ that the gate is structural; keep it structural.
   blocking finding to report, not an edit to make.
 - **Frozen waves must not be modified.** Waves 1–4 (normalize, derive, belief/intent/kernel,
   pipeline/CLI) are frozen. New work requires Technical Lead approval.
-- **No new tables, agents, or evidence feeds.** The system is deliberately three-tables-two-
+- **No new tables, agents, or evidence feeds.** The system is deliberately four-tables-two-
   agents-one-feed-one-graph. Additions belong in a post-hackathon backlog.
 - **Kernel stays domain-agnostic.** No feed name (KEV, GitHub, etcd, …) appears in
   `internal/kernel`. Domain lives in the ingestor and the demo only.
@@ -119,8 +119,14 @@ cancel atomically), and the **three-cell isolation experiment** (naive schema @ 
 silent corruption; @ SERIALIZABLE → 40001 refusal; hardened schema @ READ COMMITTED → FK refusal).
 Swapping the domain changes the ingestor and the narrative; it changes nothing above Layer 4.
 
-The CLI entry point is `cmd/solvent`. Run it with `--scenario <UUID> --reset` to process the
-full etcd KEV fixture set and produce a deterministic transcript proving pipeline correctness.
+The CLI entry point is `cmd/solvent`. It requires a DSN — set `FABLE_DSN` or pass `--dsn`.
+Run it with `--scenario <UUID> --reset` to process the full etcd KEV fixture set and produce
+a deterministic transcript proving pipeline correctness. Use
+`-falsify <belief-id> --scenario <UUID>` to atomically retract a promoted belief and cancel
+its live dependent intent in a single transaction, demonstrating the retract path. Use
+`--fixtures <dir>` when invoking from a working directory where the default fixture resolution
+does not apply. The multi-generation cascade across `belief_edge` is evidenced by M2 cases
+B-07, B-20, and B-22.
 
 ## Current State
 
@@ -129,19 +135,20 @@ against a live CockroachDB v26.2.0 cluster.
 
 | Wave | Scope | Status | Tests |
 |---|---|---|---|
-| 1 — Normalize | `internal/normalize` | Frozen | 11 |
+| 1 — Normalize | `internal/normalize` | Frozen | 12 |
 | 2 — Derive | `internal/derive` | Frozen | 16 |
 | 3 — Kernel | `internal/belief`, `internal/intent`, kernel additions | Frozen | 48 |
 | 4 — Pipeline | `internal/pipeline`, `cmd/solvent` | Frozen | 9 |
 
-**Total: 84 tests, all passing.** Serial execution required (test harness shares a single
+**Total: 85 tests, all passing.** Serial execution required (test harness shares a single
 CockroachDB database).
 
 ## Before you commit
 
 - `go build ./...` and `go vet ./...` clean; no write path outside `crdb.ExecuteTx`.
-- All 84 tests pass (run serially): `go test ./internal/kernel/ ./internal/belief/ ./internal/intent/ ./internal/derive/ ./internal/normalize/ ./internal/pipeline/ -count=1`.
-- Kernel invariant tests green — and green a second time with all embeddings NULL (I-6).
+- `gofmt -l cmd internal` produces no output (the acceptance gates enforce this).
+- All 85 tests pass (run serially): `go test ./internal/kernel/ ./internal/belief/ ./internal/intent/ ./internal/derive/ ./internal/normalize/ ./internal/pipeline/ -count=1`.
+- Kernel invariant tests green — and green a second time with zero vectors (I-6).
 - The pure-SQL proof still passes: `proof/02_lifecycle_and_invariants.sql` and the isolation
   harness in `proof/`. These are the source of truth the Go must reproduce, not diverge from.
 
@@ -152,3 +159,7 @@ or if the composite-FK + `ON UPDATE CASCADE` + CHECK interaction behaves differe
 target CockroachDB version than the invariants state (verify this early — it was proven on
 PostgreSQL), then **stop and report** with the exact file and observed-vs-expected behaviour.
 Reporting a blocker is the correct outcome. Silently redesigning around it is the only wrong one.
+
+## License
+
+MIT

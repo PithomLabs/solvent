@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/internal/derive"
@@ -102,14 +103,14 @@ func ProcessEvidence(ctx context.Context, db *sql.DB, scenarioID string, raw []b
 		}
 
 		// Query the belief ID and state.
-		beliefID, status, debtLen, err := queryBelief(ctx, db, scenarioID, d.Claim)
+		beliefID, status, debtItems, err := queryBelief(ctx, db, scenarioID, d.Claim)
 		if err != nil {
 			return nil, fmt.Errorf("pipeline: query belief: %w", err)
 		}
 
 		r.BeliefID = beliefID
 		r.Promoted = status == "promoted"
-		r.DebtItems = make([]string, debtLen)
+		r.DebtItems = debtItems
 		results = append(results, r)
 	}
 
@@ -333,7 +334,7 @@ func Run(ctx context.Context, db *sql.DB, scenarioID string, fixtureDir string) 
 			return nil, fmt.Errorf("pipeline: belief.Process: %w", err)
 		}
 
-		beliefID, status, debtLen, err := queryBelief(ctx, db, scenarioID, d.Claim)
+		beliefID, status, debtItems, err := queryBelief(ctx, db, scenarioID, d.Claim)
 		if err != nil {
 			return nil, fmt.Errorf("pipeline: query belief: %w", err)
 		}
@@ -342,7 +343,7 @@ func Run(ctx context.Context, db *sql.DB, scenarioID string, fixtureDir string) 
 			Normalized: mc.norm,
 			BeliefID:   beliefID,
 			Promoted:   status == "promoted",
-			DebtItems:  make([]string, debtLen),
+			DebtItems:  debtItems,
 			Beliefs:    []derive.DerivedBelief{d},
 		})
 	}
@@ -381,16 +382,33 @@ func Run(ctx context.Context, db *sql.DB, scenarioID string, fixtureDir string) 
 	return allResults, nil
 }
 
-// queryBelief returns the belief ID, status, and remaining debt count for a claim.
-func queryBelief(ctx context.Context, db *sql.DB, scenarioID, claim string) (id, status string, debtLen int, err error) {
+// queryBelief returns the belief ID, status, and remaining debt items for a claim.
+func queryBelief(ctx context.Context, db *sql.DB, scenarioID, claim string) (id, status string, debt []string, err error) {
+	var debtRaw string
 	err = db.QueryRowContext(ctx,
-		`SELECT id, status, coalesce(array_length(debt,1),0)
+		`SELECT id, status, debt::STRING
 		 FROM belief WHERE scenario_id=$1::UUID AND claim=$2`,
-		scenarioID, claim).Scan(&id, &status, &debtLen)
+		scenarioID, claim).Scan(&id, &status, &debtRaw)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", nil, err
 	}
-	return id, status, debtLen, nil
+	debt = parsePGArray(debtRaw)
+	return id, status, debt, nil
+}
+
+// parsePGArray parses a PostgreSQL text array literal like {a,b,c} into a string slice.
+func parsePGArray(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "{}" {
+		return []string{}
+	}
+	// Strip outer braces.
+	s = strings.TrimPrefix(s, "{")
+	s = strings.TrimSuffix(s, "}")
+	if s == "" {
+		return []string{}
+	}
+	return strings.Split(s, ",")
 }
 
 // AuditIntent returns the audit count for the scenario.

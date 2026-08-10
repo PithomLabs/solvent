@@ -12,13 +12,13 @@ Work Package 03. Companion to `docs/M1_BUILD.md`, `docs/M1_I7.md` and
 | Deliverable (`plans/M1/plan1_review.md`) | Status |
 |---|---|
 | `M1_REPORT.md` | ✅ this document |
-| PREPARE transcript | ✅ `docs/M1_PREPARE.md` — **8/8** statements prepared, none skipped |
+| PREPARE transcript | ✅ `docs/M1_PREPARE.md` — **9/9** statements prepared, none skipped |
 | Build transcript | ✅ `docs/M1_BUILD.md` — `go build ./...` exit **0** |
 | Vet transcript | ✅ `docs/M1_BUILD.md` — `go vet ./...` exit **0**; `gofmt -l` empty |
-| I-7 report | ✅ `docs/M1_I7.md` — **6** `ExecuteTx` write sites, **0** raw writes |
+| I-7 report | ✅ `docs/M1_I7.md` — **7** `ExecuteTx` write sites, **0** raw writes |
 | Remaining blockers | **None new.** Two carried items in §5. |
 
-All **seven** contract §4 functions are implemented. There is no stub (D-034).
+All **eight** contract §4 functions are implemented. There is no stub (D-034).
 
 ---
 
@@ -30,7 +30,7 @@ All **seven** contract §4 functions are implemented. There is no stub (D-034).
 
 | File | Role |
 |---|---|
-| `kernel.go` | `Store`, `New`, and all seven §4 functions |
+| `kernel.go` | `Store`, `New`, and all eight §4 functions |
 | `sql.go` | Every statement the kernel runs — one source of truth |
 | `errors.go` | The two sentinels, SQLSTATE classification, `wrapIf` |
 | `contract.go` | `Contract` interface + compile-time assertions |
@@ -49,7 +49,7 @@ the compiler, not by someone reading a table.
 ### I-7 is enforced by a gate, not a convention
 
 `scripts/check_i7.sh` refuses the build unless: zero raw `s.db.Exec`/`s.db.Query` calls; exactly
-one pool-level read, and it must belong to `AuditLiveOnNonPromoted`; exactly six
+one pool-level read, and it must belong to `AuditLiveOnNonPromoted`; exactly seven
 `crdb.ExecuteTx` sites; and zero `CREATE TEMP TABLE` (D-033).
 
 **The gate was tested against three deliberate violations**, not merely observed to pass — a
@@ -74,7 +74,7 @@ raw pool write, a write path with its `ExecuteTx` removed, and a reintroduced
 
 ## 3. PREPARE validation (D-035, D-039)
 
-All 8 catalog statements prepare cleanly against the schema-applied database, and are
+All 9 catalog statements prepare cleanly against the schema-applied database, and are
 deallocated immediately. Nothing was executed; no transaction was opened; no row was written.
 
 **What this proves.** Preparation runs CockroachDB's optimizer build, so it resolves relation
