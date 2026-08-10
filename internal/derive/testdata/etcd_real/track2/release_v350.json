@@ -1,0 +1,10 @@
+{
+  "version": "v3.5.0",
+  "tag": "v3.5.0",
+  "commit_sha": "1a2b3c4d5e6f1a2b3c4d5e6f1a2b3c4d5e6f1a2b",
+  "released_at": "2021-06-16T12:00:00Z",
+  "prerelease": false,
+  "assets": [
+    "https://github.com/etcd-io/etcd/releases/download/v3.5.0/etcd-v3.5.0-linux-amd64.tar.gz"
+  ]
+}

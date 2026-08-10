@@ -1,0 +1,24 @@
+{
+  "ghsa_id": "GHSA-q8m4-xhhv-38mg",
+  "summary": "Etcd: Denial of service vulnerability in etcd through multipart MIME parsing",
+  "severity": "critical",
+  "published_at": "2026-06-05T00:00:00Z",
+  "affected": [
+    {
+      "package": {
+        "ecosystem": "Go",
+        "name": "go.etcd.io/etcd"
+      },
+      "ranges": [
+        {
+          "type": "SEMVER",
+          "events": [
+            {"introduced": "3.5.0"},
+            {"fixed": "3.5.28"}
+          ]
+        }
+      ]
+    }
+  ],
+  "references": ["https://github.com/advisories/GHSA-q8m4-xhhv-38mg"]
+}

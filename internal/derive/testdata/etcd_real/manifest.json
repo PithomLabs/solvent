@@ -1,0 +1,9 @@
+{
+  "files": {
+    "track1/ghsa_advisory.json": "sha256:37d6234c17c8491351b15382fe939997f74c0c9f02ea7c129426c942ae9956b9",
+    "track1/release_v3527.json": "sha256:6f55678262d69edcefa4170bd49ce6727247c802a6036cb8bff644960f5b17f8",
+    "track1/release_v3528.json": "sha256:ea215bd7d5bb39125d26091aa9337caea68c9b26141d556631cbea1bc2dfd063",
+    "track2/release_v350.json": "sha256:fe60bc6a6fca23dd51529e7d1fccc3042790999d0a7a96326db2eb28c58f1314",
+    "track2/postmortem_v35.json": "sha256:0e94c17b8641d0e5b125a561caf21b42a4c0c471705cb6b30767d5401d40a4fd"
+  }
+}

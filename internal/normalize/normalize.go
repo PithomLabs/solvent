@@ -26,6 +26,10 @@ func Normalize(raw []byte, sourceType string) (NormalizedEvidence, error) {
 		return normalizeRelease(raw)
 	case SourceKEVEntry:
 		return normalizeKEVEntry(raw)
+	case SourceGitHubAdvisory:
+		return normalizeGitHubAdvisory(raw)
+	case SourcePostmortem:
+		return normalizePostmortem(raw)
 	default:
 		return NormalizedEvidence{}, fmt.Errorf("normalize: unknown source type %q", sourceType)
 	}
@@ -436,6 +440,189 @@ func normalizeKEVEntry(raw []byte) (NormalizedEvidence, error) {
 		"version_fixed":    k.VersionFixed,
 		"kev_date":         k.KEVDate,
 		"description":      k.Description,
+	})
+	norm.DomainPayload = domainPayload
+
+	return norm, nil
+}
+
+type githubAdvisory struct {
+	GHSAID      string         `json:"ghsa_id"`
+	Summary     string         `json:"summary"`
+	Severity    string         `json:"severity"`
+	PublishedAt string         `json:"published_at"`
+	Affected    []ghsaAffected `json:"affected"`
+	References  []string       `json:"references"`
+}
+
+type ghsaAffected struct {
+	Package ghsaPackage `json:"package"`
+	Ranges  []ghsaRange `json:"ranges"`
+}
+
+type ghsaPackage struct {
+	Ecosystem string `json:"ecosystem"`
+	Name      string `json:"name"`
+}
+
+type ghsaRange struct {
+	Type   string      `json:"type"`
+	Events []ghsaEvent `json:"events"`
+}
+
+type ghsaEvent struct {
+	Introduced string `json:"introduced"`
+	Fixed      string `json:"fixed"`
+}
+
+func normalizeGitHubAdvisory(raw []byte) (NormalizedEvidence, error) {
+	var g githubAdvisory
+	if err := json.Unmarshal(raw, &g); err != nil {
+		return NormalizedEvidence{}, fmt.Errorf("normalize github advisory: %w", err)
+	}
+	if g.GHSAID == "" {
+		return NormalizedEvidence{}, fmt.Errorf("normalize github advisory: ghsa_id is required")
+	}
+	if g.Summary == "" {
+		return NormalizedEvidence{}, fmt.Errorf("normalize github advisory: summary is required")
+	}
+	if g.Severity == "" {
+		return NormalizedEvidence{}, fmt.Errorf("normalize github advisory: severity is required")
+	}
+	if g.PublishedAt == "" {
+		return NormalizedEvidence{}, fmt.Errorf("normalize github advisory: published_at is required")
+	}
+	if len(g.Affected) == 0 {
+		return NormalizedEvidence{}, fmt.Errorf("normalize github advisory: affected is required")
+	}
+
+	observedAt, err := parseTimestamp(g.PublishedAt)
+	if err != nil {
+		return NormalizedEvidence{}, fmt.Errorf("normalize github advisory: %w", err)
+	}
+
+	// Extract the first affected package and version range.
+	aff := g.Affected[0]
+	pkgName := aff.Package.Name
+	ecosystem := aff.Package.Ecosystem
+	var introduced, fixed string
+	if len(aff.Ranges) > 0 && len(aff.Ranges[0].Events) > 0 {
+		for _, ev := range aff.Ranges[0].Events {
+			if ev.Introduced != "" {
+				introduced = ev.Introduced
+			}
+			if ev.Fixed != "" {
+				fixed = ev.Fixed
+			}
+		}
+	}
+
+	subject := fmt.Sprintf("%s/%s >=%s, <%s", ecosystem, pkgName, introduced, fixed)
+	assertion := fmt.Sprintf("vulnerable to %s", g.GHSAID)
+
+	sourceURL := ""
+	if len(g.References) > 0 {
+		sourceURL = g.References[0]
+	}
+
+	norm := NormalizedEvidence{
+		SourceURL:       sourceURL,
+		SourceType:      SourceGitHubAdvisory,
+		ObservedAt:      observedAt,
+		ProvenanceClass: ProvenanceExternalFeed,
+		Subject:         subject,
+		Assertion:       assertion,
+		Severity:        classifySeverity(g.Summary, ""),
+	}
+
+	type hashable struct {
+		GHSAID   string `json:"ghsa_id"`
+		Severity string `json:"severity"`
+		Summary  string `json:"summary"`
+	}
+	norm.ContentSHA256 = computeSHA256(hashable{GHSAID: g.GHSAID, Severity: g.Severity, Summary: g.Summary})
+	norm.ID = norm.ContentSHA256
+
+	domainPayload, _ := json.Marshal(map[string]interface{}{
+		"ghsa_id":      g.GHSAID,
+		"severity":     g.Severity,
+		"summary":      g.Summary,
+		"published_at": g.PublishedAt,
+		"affected":     g.Affected,
+		"references":   g.References,
+	})
+	norm.DomainPayload = domainPayload
+
+	return norm, nil
+}
+
+type postmortemRecord struct {
+	Title            string `json:"title"`
+	AffectedVersions string `json:"affected_versions"`
+	FixedVersion     string `json:"fixed_version"`
+	Summary          string `json:"summary"`
+	PublishedAt      string `json:"published_at"`
+	SourceURL        string `json:"source_url"`
+}
+
+func normalizePostmortem(raw []byte) (NormalizedEvidence, error) {
+	var p postmortemRecord
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return NormalizedEvidence{}, fmt.Errorf("normalize postmortem: %w", err)
+	}
+	if p.Title == "" {
+		return NormalizedEvidence{}, fmt.Errorf("normalize postmortem: title is required")
+	}
+	if p.AffectedVersions == "" {
+		return NormalizedEvidence{}, fmt.Errorf("normalize postmortem: affected_versions is required")
+	}
+	if p.FixedVersion == "" {
+		return NormalizedEvidence{}, fmt.Errorf("normalize postmortem: fixed_version is required")
+	}
+	if p.Summary == "" {
+		return NormalizedEvidence{}, fmt.Errorf("normalize postmortem: summary is required")
+	}
+	if p.PublishedAt == "" {
+		return NormalizedEvidence{}, fmt.Errorf("normalize postmortem: published_at is required")
+	}
+	if p.SourceURL == "" {
+		return NormalizedEvidence{}, fmt.Errorf("normalize postmortem: source_url is required")
+	}
+
+	observedAt, err := parseTimestamp(p.PublishedAt)
+	if err != nil {
+		return NormalizedEvidence{}, fmt.Errorf("normalize postmortem: %w", err)
+	}
+
+	subject := p.AffectedVersions
+	assertion := fmt.Sprintf("%s has documented data inconsistency", subject)
+
+	norm := NormalizedEvidence{
+		SourceURL:       p.SourceURL,
+		SourceType:      SourcePostmortem,
+		ObservedAt:      observedAt,
+		ProvenanceClass: ProvenanceExternalFeed,
+		Subject:         subject,
+		Assertion:       assertion,
+		Severity:        SeverityCritical,
+	}
+
+	type hashable struct {
+		Title            string `json:"title"`
+		AffectedVersions string `json:"affected_versions"`
+		FixedVersion     string `json:"fixed_version"`
+		Summary          string `json:"summary"`
+	}
+	norm.ContentSHA256 = computeSHA256(hashable{Title: p.Title, AffectedVersions: p.AffectedVersions, FixedVersion: p.FixedVersion, Summary: p.Summary})
+	norm.ID = norm.ContentSHA256
+
+	domainPayload, _ := json.Marshal(map[string]interface{}{
+		"title":             p.Title,
+		"affected_versions": p.AffectedVersions,
+		"fixed_version":     p.FixedVersion,
+		"summary":           p.Summary,
+		"published_at":      p.PublishedAt,
+		"source_url":        p.SourceURL,
 	})
 	norm.DomainPayload = domainPayload
 

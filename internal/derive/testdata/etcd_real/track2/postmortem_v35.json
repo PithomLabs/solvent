@@ -1,0 +1,8 @@
+{
+  "title": "etcd v3.5 Data Inconsistency Postmortem",
+  "affected_versions": "v3.5.x",
+  "fixed_version": "v3.5.12",
+  "summary": "Data inconsistency between v3.5.x and v3.4.x discovered due to incorrect revision counting in the apply pipeline. A learner member receiving a snapshot could compute a different revision than the leader, causing divergent MVCC state.",
+  "published_at": "2022-12-06T00:00:00Z",
+  "source_url": "https://github.com/etcd-io/etcd/blob/main/Documentation/postmortems/v35-data-inconsistency.md"
+}
