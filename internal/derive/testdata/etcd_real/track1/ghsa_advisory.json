@@ -1,13 +1,13 @@
 {
   "ghsa_id": "GHSA-q8m4-xhhv-38mg",
-  "summary": "Etcd: Denial of service vulnerability in etcd through multipart MIME parsing",
-  "severity": "critical",
-  "published_at": "2026-06-05T00:00:00Z",
+  "summary": "etcd: Authorization bypasses in multiple APIs",
+  "severity": "high",
+  "published_at": "2026-03-20T20:48:14Z",
   "affected": [
     {
       "package": {
-        "ecosystem": "Go",
-        "name": "go.etcd.io/etcd"
+        "ecosystem": "go",
+        "name": "go.etcd.io/etcd/v3"
       },
       "ranges": [
         {
