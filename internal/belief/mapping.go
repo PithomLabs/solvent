@@ -28,6 +28,9 @@ var DebtMapping = map[string][]DebtRule{
 	"github_pr": {
 		{Match: regexp.MustCompile(`(?i)\bfix\b`), Items: []string{"needMap", "needInvariant"}},
 	},
+	"github_advisory": {
+		{Match: regexp.MustCompile(`(?i)vulnerable to`), Items: []string{"needMap"}},
+	},
 }
 
 // DebtItemsForEvidence returns the debt items that the given evidence retires.
