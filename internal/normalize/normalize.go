@@ -12,6 +12,7 @@ import (
 
 var cvePattern = regexp.MustCompile(`^CVE-\d{4}-\d{4,}$`)
 var urlPattern = regexp.MustCompile(`^https?://`)
+var githubAssetPattern = regexp.MustCompile(`^https?://github\.com/([^/]+/[^/]+)/releases/`)
 
 func Normalize(raw []byte, sourceType string) (NormalizedEvidence, error) {
 	switch sourceType {
@@ -259,14 +260,14 @@ func normalizeMaintainerComment(raw []byte) (NormalizedEvidence, error) {
 	norm.ID = norm.ContentSHA256
 
 	domainPayload, _ := json.Marshal(map[string]interface{}{
-		"comment_id":        m.CommentID,
+		"comment_id":         m.CommentID,
 		"issue_or_pr_number": m.IssueOrPRNumber,
-		"repository":        m.Repository,
-		"author":            m.Author,
-		"body_raw":          m.Body,
-		"body_clean":        bodyClean,
-		"keywords":          keywords,
-		"is_maintainer":     IsMaintainer(m.Author),
+		"repository":         m.Repository,
+		"author":             m.Author,
+		"body_raw":           m.Body,
+		"body_clean":         bodyClean,
+		"keywords":           keywords,
+		"is_maintainer":      IsMaintainer(m.Author),
 	})
 	norm.DomainPayload = domainPayload
 
@@ -307,12 +308,30 @@ func normalizeRelease(raw []byte) (NormalizedEvidence, error) {
 
 	versionClean := normalizeVersion(r.Version)
 
+	// Derive repository from asset URLs if available (domain-neutral).
+	repo := ""
+	for _, asset := range r.Assets {
+		if m := githubAssetPattern.FindStringSubmatch(asset); len(m) > 1 {
+			repo = m[1]
+			break
+		}
+	}
+
+	var sourceURL, subject string
+	if repo != "" {
+		sourceURL = fmt.Sprintf("https://github.com/%s/releases/tag/%s", repo, r.Tag)
+		subject = fmt.Sprintf("%s %s", repo, versionClean)
+	} else {
+		sourceURL = fmt.Sprintf("https://github.com/releases/tag/%s", r.Tag)
+		subject = fmt.Sprintf("release %s", versionClean)
+	}
+
 	norm := NormalizedEvidence{
-		SourceURL:       fmt.Sprintf("https://github.com/etcd-io/etcd/releases/tag/%s", r.Tag),
+		SourceURL:       sourceURL,
 		SourceType:      SourceRelease,
 		ObservedAt:      observedAt,
 		ProvenanceClass: ProvenanceExternalFeed,
-		Subject:         fmt.Sprintf("etcd %s", versionClean),
+		Subject:         subject,
 		Assertion:       fmt.Sprintf("release %s published", versionClean),
 		Severity:        SeverityInfo,
 	}
@@ -410,13 +429,13 @@ func normalizeKEVEntry(raw []byte) (NormalizedEvidence, error) {
 	norm.ID = norm.ContentSHA256
 
 	domainPayload, _ := json.Marshal(map[string]interface{}{
-		"cve_id":            k.CVEID,
-		"vendor":            k.Vendor,
-		"product":           k.Product,
-		"version_affected":  k.VersionAffected,
-		"version_fixed":     k.VersionFixed,
-		"kev_date":          k.KEVDate,
-		"description":       k.Description,
+		"cve_id":           k.CVEID,
+		"vendor":           k.Vendor,
+		"product":          k.Product,
+		"version_affected": k.VersionAffected,
+		"version_fixed":    k.VersionFixed,
+		"kev_date":         k.KEVDate,
+		"description":      k.Description,
 	})
 	norm.DomainPayload = domainPayload
 

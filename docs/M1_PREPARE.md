@@ -11,7 +11,7 @@ arise only at execution, which is M2's gate.
 
 | run fact | value |
 |---|---|
-| generated_at | 2026-08-07T00:13:09Z |
+| generated_at | 2026-08-10T07:20:32Z |
 | host | linux |
 | dsn | postgresql://root@localhost:26260/fable?sslmode=disable |
 
@@ -19,14 +19,15 @@ arise only at execution, which is M2's gate.
 
 ## Verdict
 
-**GREEN** — 8/8 statements prepared, none skipped.
+**GREEN** — 9/9 statements prepared, none skipped.
 
 ## Statements
 
 | statement | prepared | sqlstate | message | elapsed_ms |
 |---|---|---|---|---|
-| `verify_add_evidence` | PASS | — | — | 1 |
-| `verify_audit_live_on_nonpromoted` | PASS | — | — | 0 |
+| `verify_add_evidence` | PASS | — | — | 2 |
+| `verify_audit_live_on_nonpromoted` | PASS | — | — | 1 |
+| `verify_ensure_belief` | PASS | — | — | 1 |
 | `verify_enter_belief` | PASS | — | — | 0 |
 | `verify_intent_on_promoted` | PASS | — | — | 0 |
 | `verify_promote` | PASS | — | — | 0 |
@@ -50,6 +51,25 @@ VALUES ($1::UUID, $2::UUID, $3::STRING, $4::STRING, $5::STRING)
 SELECT count(*) FROM action_intent a
 JOIN belief b ON b.id = a.belief_id
 WHERE a.state = 'live' AND b.status <> 'promoted' AND a.scenario_id = $1::UUID
+```
+
+### ensure_belief
+
+```sql
+WITH existing AS (
+	SELECT id FROM belief
+	WHERE scenario_id = $1::UUID AND claim = $2::STRING
+	LIMIT 1
+),
+inserted AS (
+	INSERT INTO belief (scenario_id, claim, claim_type)
+	SELECT $1::UUID, $2::STRING, $3::STRING
+	WHERE NOT EXISTS (SELECT 1 FROM existing)
+	RETURNING id
+)
+SELECT id FROM existing
+UNION ALL
+SELECT id FROM inserted
 ```
 
 ### enter_belief

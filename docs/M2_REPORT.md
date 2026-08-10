@@ -7,13 +7,13 @@ Work Package 04. Companion to `docs/M2_TRANSCRIPT.md` (behavioral receipts) and
 
 ## 1. Verdict
 
-**M2 is GREEN.** `./scripts/m2_accept.sh` exits 0. **25/25 cases pass**, on two
+**M2 is GREEN.** `./scripts/m2_accept.sh` exits 0. **28/28 cases pass**, on two
 consecutive runs.
 
 | Deliverable (`plans/M2/plan2_M2_review.md`) | Status |
 |---|---|
 | `M2_REPORT.md` | ✅ this document |
-| `M2_TRANSCRIPT.md` | ✅ 25 rows, all PASS, none skipped |
+| `M2_TRANSCRIPT.md` | ✅ 28 rows, all PASS, none skipped |
 | `M2_TEST.md` | ✅ both runs captured, both exit 0 |
 | `M2_FAILURE.md` | ✅ **absent** — correct on a green run (its machinery was proven separately, §4) |
 | Behavioral receipts | ✅ SQLSTATE + constraint name per case, from `*pgconn.PgError` |
@@ -71,7 +71,7 @@ is a *refusal*, not corruption. The schema still holds the line.
   `retracted` counts beliefs, never intents (N3).
 - **B-08 / B-13** the audit returns 0 per-scenario and 0 globally across every scenario
   the suite created.
-- **B-01 … B-06** all seven §4 functions execute to contract, including `RetireDebt`'s
+- **B-01 … B-06** all eight §4 functions execute to contract, including `RetireDebt`'s
   idempotency on an absent item.
 
 ---
@@ -122,8 +122,8 @@ false positive cannot recur.
 | **0** — harness | W0 | 1 | ✅ green |
 | **1** — core kernel + retry gate | B-01, B-17, B-23, B-02, B-03, B-04, B-05, B-09, B-10, **B-18**, B-06, B-11, B-12 | 13 | ✅ green |
 | **2** — cascade behavior | B-07, B-20, B-22, B-19, **B-24**, **B-16**, B-08, B-13 | 8 | ✅ green |
-| **3** — edge cases and closure | B-21, B-14, B-15 | 3 | ✅ green |
-| | **total** | **25** | ✅ green ×2 runs |
+| **3** — edge cases and closure | B-21, B-14, B-15, W3-Ensure-New, W3-Ensure-Existing, W3-Ensure-DiffScenario | 6 | ✅ green |
+| | **total** | **28** | ✅ green ×2 runs |
 
 Wave discipline held (M2-R8): no wave began before the previous one was green. D-048's
 promotion of B-18 into Wave 1 paid off in the way it was meant to — the retry mechanism
@@ -143,7 +143,7 @@ implementation rather than after twenty more cases had been built on top of it.
   applies to whoever adds the column.
 - **I-7 is not runtime-executable.** No test proves a negative about code paths. B-15
   records this plainly and the gate re-runs `scripts/check_i7.sh` before the suite —
-  6 `ExecuteTx` write sites, 0 raw writes. The transcript row says "NOT
+  7 `ExecuteTx` write sites, 0 raw writes. The transcript row says "NOT
   runtime-executable" rather than claiming coverage M2 does not have.
 - **M0 §3.1** — the M5 ruling on displaying `ConstraintName` beside a raw CHECK error is
   still open. M2 reads `ConstraintName` inside tests, which is not a demo surface.

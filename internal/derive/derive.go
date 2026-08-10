@@ -9,13 +9,13 @@ import (
 )
 
 var (
-	cvePattern        = regexp.MustCompile(`CVE-\d{4}-\d{4,}`)
-	vulnPattern       = regexp.MustCompile(`(?i)vulnerable to`)
-	reproducesPattern = regexp.MustCompile(`(?i)\b(reproduces|still vulnerable)\b`)
+	cvePattern          = regexp.MustCompile(`CVE-\d{4}-\d{4,}`)
+	vulnPattern         = regexp.MustCompile(`(?i)vulnerable to`)
+	reproducesPattern   = regexp.MustCompile(`(?i)\b(reproduces|still vulnerable)\b`)
 	noRegressionPattern = regexp.MustCompile(`(?i)\bno regression\b`)
-	regressionKeywords = []string{"no regression"}
-	securityKeywords  = []string{"security review", "reviewed by"}
-	testKeywords      = []string{"tested", "confirmed"}
+	regressionKeywords  = []string{"no regression"}
+	securityKeywords    = []string{"security review", "reviewed by"}
+	testKeywords        = []string{"tested", "confirmed"}
 )
 
 // Derive produces derived beliefs from normalized evidence.

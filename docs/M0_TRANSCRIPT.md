@@ -7,7 +7,7 @@ Every row is a receipt: SQLSTATE from `*pgconn.PgError`, never a substring match
 
 | run fact | value |
 |---|---|
-| generated_at | 2026-08-07T00:13:11Z |
+| generated_at | 2026-08-10T07:20:15Z |
 | host | linux |
 | dsn | postgresql://root@localhost:26260/fable?sslmode=disable |
 | schema | db/001_schema.sql |
@@ -20,24 +20,24 @@ Every row is a receipt: SQLSTATE from `*pgconn.PgError`, never a substring match
 
 ## Probes
 
-| id | status | criterion | expected | observed | sqlstate | constraint | elapsed_ms |
-|---|---|---|---|---|---|---|---|
-| A1 | PASS | CockroachDB version recorded (contract §6 M0: confirm cluster version) | CockroachDB v26.x | CockroachDB CCL v26.2.0 (x86_64-pc-linux-gnu, built 2026/04/21 18:36:57, go1.25.5) | — | — | 11 |
-| A2 | PASS | READ COMMITTED is available on this cluster (contract §7 M0) | true | true | — | — | 0 |
-| A3 | PASS | A transaction opened as READ COMMITTED reports READ COMMITTED (not silently upgraded) | read committed | read committed | — | — | 0 |
-| A4 | PASS | Default isolation level recorded | serializable | serializable | — | — | 0 |
-| B1 | PASS | db/001_schema.sql applies with zero errors (contract §7 M0) | all 6 statements apply | all 6 statements applied | — | — | 714 |
-| B2 | PASS | SHOW CREATE TABLE preserves the load-bearing constraints (gate FK ON UPDATE CASCADE, UNIQUE(id,status), both CHECKs, partial index) | snapshot captured; contains ON UPDATE CASCADE, belief_id_status_key, promoted_is_debt_free, live_requires_promoted, live_intents | snapshot captured; all five markers present | — | — | 64 |
-| B3 | PASS | Exactly the four contracted tables exist (contract §2) | action_intent, belief, belief_edge, evidence | action_intent, belief, belief_edge, evidence | — | — | 3 |
-| B4 | PASS | Schema metadata is byte-identical before and after the D-series cascade (D-025) | byte-identical to the B2 snapshot | identical — cascade did not rewrite metadata | — | — | 38 |
-| C1 | PASS | A promoted-with-open-debt UPDATE fails with SQLSTATE 23514 (contract §7 M0; invariant I-1) | refused, SQLSTATE 23514, constraint promoted_is_debt_free | refused with SQLSTATE 23514, constraint promoted_is_debt_free (structured field) | 23514 | promoted_is_debt_free | 2 |
-| C2 | PASS | Promoting a final-truth claim fails with SQLSTATE 23514 (invariant I-2) | refused, SQLSTATE 23514, constraint promoted_is_debt_free | refused with SQLSTATE 23514, constraint promoted_is_debt_free (structured field) | 23514 | promoted_is_debt_free | 1 |
-| C3 | PASS | A promoted-debt-free UPDATE succeeds (contract §7 M0) | statement succeeds | succeeded | — | — | 3 |
-| D1 | PASS | An action intent citing a non-promoted belief is refused by the composite FK (invariant I-3) | refused, SQLSTATE 23503, constraint gate | refused with SQLSTATE 23503, constraint gate (structured field) | 23503 | gate | 1 |
-| D2 | PASS | An action intent citing a promoted belief is accepted | statement succeeds | succeeded | — | — | 2 |
-| D3 | PASS | Retracting a belief that still carries a live intent is refused (invariant I-4; the §9 high-risk interaction) | refused, SQLSTATE 23514, constraint live_requires_promoted | refused with SQLSTATE 23514, constraint live_requires_promoted (structured field) | 23514 | live_requires_promoted | 2 |
-| D4 | PASS | Cancel-then-retract commits in ONE transaction, and ON UPDATE CASCADE propagates the new status into the surviving cancelled intent (invariant I-8) | commits; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | committed; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | — | — | 12 |
-| D5 | PASS | AuditLiveOnNonPromoted returns 0 in committed state (invariant I-5) | 0 | 0 | — | — | 8 |
+| id | status | criterion | expected | observed | sqlstate | constraint |
+|---|---|---|---|---|---|---|
+| A1 | PASS | CockroachDB version recorded (contract §6 M0: confirm cluster version) | CockroachDB v26.x | CockroachDB CCL v26.2.0 (x86_64-pc-linux-gnu, built 2026/04/21 18:36:57, go1.25.5) | — | — |
+| A2 | PASS | READ COMMITTED is available on this cluster (contract §7 M0) | true | true | — | — |
+| A3 | PASS | A transaction opened as READ COMMITTED reports READ COMMITTED (not silently upgraded) | read committed | read committed | — | — |
+| A4 | PASS | Default isolation level recorded | serializable | serializable | — | — |
+| B1 | PASS | db/001_schema.sql applies with zero errors (contract §7 M0) | all 6 statements apply | all 6 statements applied | — | — |
+| B2 | PASS | SHOW CREATE TABLE preserves the load-bearing constraints (gate FK ON UPDATE CASCADE, UNIQUE(id,status), both CHECKs, partial index) | snapshot captured; contains ON UPDATE CASCADE, belief_id_status_key, promoted_is_debt_free, live_requires_promoted, live_intents | snapshot captured; all five markers present | — | — |
+| B3 | PASS | Exactly the four contracted tables exist (contract §2) | action_intent, belief, belief_edge, evidence | action_intent, belief, belief_edge, evidence | — | — |
+| B4 | PASS | Schema metadata is byte-identical before and after the D-series cascade (D-025) | byte-identical to the B2 snapshot | identical — cascade did not rewrite metadata | — | — |
+| C1 | PASS | A promoted-with-open-debt UPDATE fails with SQLSTATE 23514 (contract §7 M0; invariant I-1) | refused, SQLSTATE 23514, constraint promoted_is_debt_free | refused with SQLSTATE 23514, constraint promoted_is_debt_free (structured field) | 23514 | promoted_is_debt_free |
+| C2 | PASS | Promoting a final-truth claim fails with SQLSTATE 23514 (invariant I-2) | refused, SQLSTATE 23514, constraint promoted_is_debt_free | refused with SQLSTATE 23514, constraint promoted_is_debt_free (structured field) | 23514 | promoted_is_debt_free |
+| C3 | PASS | A promoted-debt-free UPDATE succeeds (contract §7 M0) | statement succeeds | succeeded | — | — |
+| D1 | PASS | An action intent citing a non-promoted belief is refused by the composite FK (invariant I-3) | refused, SQLSTATE 23503, constraint gate | refused with SQLSTATE 23503, constraint gate (structured field) | 23503 | gate |
+| D2 | PASS | An action intent citing a promoted belief is accepted | statement succeeds | succeeded | — | — |
+| D3 | PASS | Retracting a belief that still carries a live intent is refused (invariant I-4; the §9 high-risk interaction) | refused, SQLSTATE 23514, constraint live_requires_promoted | refused with SQLSTATE 23514, constraint live_requires_promoted (structured field) | 23514 | live_requires_promoted |
+| D4 | PASS | Cancel-then-retract commits in ONE transaction, and ON UPDATE CASCADE propagates the new status into the surviving cancelled intent (invariant I-8) | commits; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | committed; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | — | — |
+| D5 | PASS | AuditLiveOnNonPromoted returns 0 in committed state (invariant I-5) | 0 | 0 | — | — |
 
 ## Statements
 
