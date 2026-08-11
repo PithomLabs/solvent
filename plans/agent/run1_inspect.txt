@@ -1,0 +1,57 @@
+=== SOLVENT LEDGER ===
+
+--- BELIEFS ---
+  ID:         4dbc77de-40fe-4f64-b6db-ebba21fad2fb
+  Scenario:   00000000-0000-0000-0000-000000000001
+  Type:       accommodated
+  Status:     entered
+  Claim:      fix available for etcd-io/etcd v3.5.27
+  Debt:       {needToyCheck,needNullModel,needObstruction,needFaithfulnessReview}
+
+  ID:         ac103fc7-4302-4297-8c6e-c494c29258a0
+  Scenario:   00000000-0000-0000-0000-000000000001
+  Type:       accommodated
+  Status:     entered
+  Claim:      fix available for etcd-io/etcd v3.5.28
+  Debt:       {needToyCheck,needNullModel,needObstruction,needFaithfulnessReview}
+
+  ID:         f5b30ab6-61f1-4968-9a4e-871457787aa0
+  Scenario:   00000000-0000-0000-0000-000000000001
+  Type:       derived
+  Status:     entered
+  Claim:      go/go.etcd.io/etcd/v3 >=3.5.0, <3.5.28 is vulnerable to GHSA-q8m4-xhhv-38mg
+  Debt:       {needInvariant,needToyCheck,needNullModel,needObstruction,needFaithfulnessReview}
+
+  ID:         a0a93cfa-0657-4fbf-8933-af9b0abeef90
+  Scenario:   00000000-0000-0000-0000-000000000002
+  Type:       postulated
+  Status:     entered
+  Claim:      etcd v3.5.0 is approved for production deployment (decision as of 2021-06-16)
+  Debt:       {needMap,needInvariant,needToyCheck,needNullModel,needObstruction,needFaithfulnessReview}
+
+--- EVIDENCE ---
+  ID:         d5a27c87-d6f8-464e-9c7d-238e78e5a54e
+  Belief:     4dbc77de-40fe-4f64-b6db-ebba21fad2fb
+  Class:      external_feed
+  URL:        https://github.com/etcd-io/etcd/releases/tag/v3.5.27
+
+  ID:         6876c2d6-9212-4b06-8d60-7267d8d1227b
+  Belief:     a0a93cfa-0657-4fbf-8933-af9b0abeef90
+  Class:      external_feed
+  URL:        https://github.com/etcd-io/etcd/releases/tag/v3.5.0
+
+  ID:         82f685ca-4598-49fc-a9ba-9df58c5cdeaa
+  Belief:     ac103fc7-4302-4297-8c6e-c494c29258a0
+  Class:      external_feed
+  URL:        https://github.com/etcd-io/etcd/releases/tag/v3.5.28
+
+  ID:         50388ac3-d0d7-40ea-8c58-319ba622c98e
+  Belief:     f5b30ab6-61f1-4968-9a4e-871457787aa0
+  Class:      external_feed
+  URL:        https://github.com/advisories/GHSA-q8m4-xhhv-38mg
+
+--- INTENTS ---
+--- AUDIT ---
+  Live intents on non-promoted beliefs: 0 (SAFE)
+
+=== END LEDGER ===
