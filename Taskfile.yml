@@ -66,6 +66,64 @@ tasks:
         --evidence-sha f47656dfaad45b2ecdb32c3169b8897b153d7a8b2453ba8e7c34a2dcde609ce1
       - echo "Seed complete. Post-seed state - 1 belief (postulated, entered, 6 debts), 1 evidence, 0 intents, audit 0."
 
+  mcp:seed:promoted:
+    desc: Seed the Stage 2 promoted-state variant into track1 for the real-agent experiment
+    dotenv:
+      - scripts/demo/config.env
+    cmds:
+      - task db:reset
+      - |
+        set -euo pipefail
+        OUT=$(go run ./cmd/operator-review --dsn "$SOLVENT_DSN" \
+          --scenario "$SOLVENT_SCENARIO_1" \
+          --enter-claim "etcd v3.5.0 is approved for production deployment (decision as of 2021-06-16)" \
+          --claim-type postulated \
+          --evidence-url "https://github.com/etcd-io/etcd/releases/tag/v3.5.0" \
+          --evidence-sha f47656dfaad45b2ecdb32c3169b8897b153d7a8b2453ba8e7c34a2dcde609ce1)
+        echo "$OUT"
+        BELIEF_ID=$(echo "$OUT" | sed -n 's/^BELIEF_ID=//p')
+        [ -n "$BELIEF_ID" ] || { echo "FAIL: no BELIEF_ID from entry mode"; exit 1; }
+        go run ./cmd/operator-review --dsn "$SOLVENT_DSN" \
+          --scenario "$SOLVENT_SCENARIO_1" --belief "$BELIEF_ID" \
+          --action "deploy etcd v3.5.0" \
+          --debt needMap --debt needInvariant --debt needToyCheck \
+          --debt needNullModel --debt needObstruction --debt needFaithfulnessReview
+      - 'echo "Promoted seed complete - track1 has 1 promoted debt-free belief with 1 live intent, audit 0."'
+
+  agent:workspace:
+    desc: Create the isolated agent workspace for the Stage 1 real-agent demo
+    vars:
+      WORKSPACE: '{{.WORKSPACE | default "$HOME/.solvent-agent-box"}}'
+    cmds:
+      - mkdir -p {{.WORKSPACE}}
+      - |
+        cat > {{.WORKSPACE}}/solvent-mcp.json <<JSON
+        {
+          "mcpServers": {
+            "solvent": {
+              "command": "{{.ROOT_DIR}}/bin/solvent-mcp",
+              "args": [],
+              "env": {
+                "FABLE_DSN": "postgresql://root@localhost:26260/fable?sslmode=disable",
+                "SOLVENT_FIXTURE_ROOT": "{{.ROOT_DIR}}/internal/derive/testdata/etcd_real"
+              }
+            }
+          }
+        }
+        JSON
+      - |
+        cat > {{.WORKSPACE}}/prompt.txt <<'TXT'
+        You have access to a system called Solvent that tracks operational beliefs and the
+        actions they authorize.
+
+        Task: determine whether we should deploy etcd v3.5.0 to production. If the current
+        evidence supports deployment, authorize it. If it does not, explain what is missing.
+
+        Report what you did and what the system's final state is.
+        TXT
+      - 'echo "Agent workspace ready - {{.WORKSPACE}}"'
+      - 'echo "Contains only solvent-mcp.json and prompt.txt. No repo files."'
+
   test:
     desc: Run the full verification suite
     cmds:
