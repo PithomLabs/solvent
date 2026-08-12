@@ -22,6 +22,7 @@ tasks:
   db:reset:
     desc: Drop and recreate the fable database, reapply schema
     cmds:
+      - echo "Resetting database 'fable' on solvent-crdb (DROP DATABASE IF EXISTS fable CASCADE)..."
       - docker exec solvent-crdb cockroach sql --insecure -e "DROP DATABASE IF EXISTS fable CASCADE; CREATE DATABASE fable;"
       - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/001_schema.sql
       - echo "Database reset complete."
@@ -45,6 +46,18 @@ tasks:
     desc: Show a human-readable snapshot of the current ledger
     cmds:
       - bash scripts/demo/inspect.sh
+
+  demo:film:
+    desc: Filmable walkthrough (interactive pacing)
+    deps: [db:up]
+    cmds:
+      - bash scripts/demo/walkthrough.sh
+
+  demo:film:auto:
+    desc: Filmable walkthrough (auto pacing, 6s per beat)
+    deps: [db:up]
+    cmds:
+      - bash scripts/demo/walkthrough.sh --auto 6
 
   mcp:build:
     desc: Build the MCP server binary
