@@ -28,6 +28,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // Dim is the embedding width, fixed by db/002_corpus.sql's VECTOR(1024).
@@ -104,6 +105,61 @@ func Insert(ctx context.Context, db *sql.DB, iss Issue) (id string, inserted boo
 	return id, true, nil
 }
 
+// InsertBatch inserts many corpus rows in ONE statement and returns how many
+// were new. Same identity and same conflict behaviour as Insert.
+//
+// # This path is valid ONLY while every row's embedding is nil
+//
+// CockroachDB documents that large batch inserts of VECTOR values degrade badly
+// and should be avoided, which is why Insert is one row per statement and why the
+// corpus tests seed that way. That hazard is about the vector payload. Phase 3
+// ingests the issue corpus with embedding NULL — there is no vector in flight —
+// so batching is safe here and turns a 20-30 minute cloud ingest into about a
+// minute.
+//
+// The moment embeddings are present, this function is the wrong tool: it rejects
+// any row carrying one rather than letting a later phase inherit the shortcut by
+// accident. Use Insert for embedded rows.
+func InsertBatch(ctx context.Context, db *sql.DB, issues []Issue) (inserted int, err error) {
+	if len(issues) == 0 {
+		return 0, nil
+	}
+
+	const cols = 8
+	args := make([]any, 0, len(issues)*cols)
+	var b strings.Builder
+	b.WriteString(`INSERT INTO corpus_issue
+	  (scenario_id, issue_number, title, body, state, url, closed_at, content_sha256)
+	VALUES `)
+
+	for i, iss := range issues {
+		if iss.Embedding != nil {
+			return 0, fmt.Errorf(
+				"InsertBatch received an embedding for issue %d: batching VECTOR values is unsafe, use Insert",
+				iss.IssueNumber)
+		}
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		n := i * cols
+		fmt.Fprintf(&b, "($%d::UUID,$%d::INT,$%d::STRING,$%d::STRING,$%d::STRING,$%d::STRING,$%d::TIMESTAMPTZ,$%d::STRING)",
+			n+1, n+2, n+3, n+4, n+5, n+6, n+7, n+8)
+		args = append(args, iss.ScenarioID, iss.IssueNumber, iss.Title, iss.Body,
+			iss.State, iss.URL, iss.ClosedAt, iss.ContentSHA256)
+	}
+	b.WriteString(" ON CONFLICT (scenario_id, issue_number) DO NOTHING")
+
+	res, err := db.ExecContext(ctx, b.String(), args...)
+	if err != nil {
+		return 0, fmt.Errorf("insert corpus batch of %d: %w", len(issues), err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
 const sqlSetEmbedding = `
 	UPDATE corpus_issue SET embedding = $2::VECTOR WHERE id = $1::UUID`
 
@@ -133,6 +189,26 @@ func SetEmbedding(ctx context.Context, db *sql.DB, id string, vec []float32) err
 //
 // <=> is the cosine-distance operator, matching the index's vector_cosine_ops
 // opclass. Using a different operator here would silently fall back to a scan.
+//
+// There is deliberately NO "AND embedding IS NOT NULL" predicate here, and that
+// is a measured decision rather than an oversight.
+//
+// Ingestion lands rows before embeddings exist, so the corpus legitimately holds
+// unembedded rows, and the obvious instinct is to filter them out in SQL. Doing so
+// is actively harmful: adding that predicate makes CockroachDB abandon the vector
+// index and fall back to a scan of corpus_issue_scenario_number_key — verified by
+// EXPLAIN on both query shapes over identical data.
+//
+// The predicate is also unnecessary. A row with a NULL embedding is not present in
+// the vector index at all, so the index-backed path can never surface one and can
+// never produce a NULL distance. Verified directly: with 50 unembedded rows and 1
+// embedded row in the same scenario, this query returns exactly the embedded row
+// at distance 0.
+//
+// Robustness against the degenerate case is handled in Go instead — see the
+// NullFloat64 scan in Search — so that if the optimizer ever does choose a scan,
+// unembedded rows are skipped rather than crashing the caller. That costs nothing
+// and keeps the index path optimal.
 const sqlSearch = `
 	SELECT id, issue_number, title, url, state, embedding <=> $2::VECTOR AS distance
 	FROM corpus_issue
@@ -159,9 +235,19 @@ func Search(ctx context.Context, db *sql.DB, scenarioID string, query []float32,
 	var out []Hit
 	for rows.Next() {
 		var h Hit
-		if err := rows.Scan(&h.ID, &h.IssueNumber, &h.Title, &h.URL, &h.State, &h.Distance); err != nil {
+		// Distance is scanned as nullable purely as a backstop. On the index path
+		// it is never NULL, because unembedded rows are not in the vector index.
+		// If the optimizer ever falls back to a scan, unembedded rows would appear
+		// with a NULL distance and sort first under ASC; skipping them here keeps
+		// that degradation from becoming a crash or a page of empty results.
+		var dist sql.NullFloat64
+		if err := rows.Scan(&h.ID, &h.IssueNumber, &h.Title, &h.URL, &h.State, &dist); err != nil {
 			return nil, fmt.Errorf("corpus search scan: %w", err)
 		}
+		if !dist.Valid {
+			continue
+		}
+		h.Distance = dist.Float64
 		out = append(out, h)
 	}
 	return out, rows.Err()

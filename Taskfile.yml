@@ -138,6 +138,25 @@ tasks:
       - 'echo "Agent workspace ready - {{.WORKSPACE}}"'
       - 'echo "Contains only solvent-mcp.json and prompt.txt. No repo files."'
 
+  corpus:fetch:
+    desc: Capture the canonical etcd issue corpus snapshot from GitHub (reads GitHub once)
+    cmds:
+      - go run ./cmd/corpus-ingest --fetch corpus-data/etcd-issues.ndjson
+
+  corpus:ingest:
+    desc: Load the captured snapshot into the local database (idempotent)
+    dotenv:
+      - scripts/demo/config.env
+    cmds:
+      - go run ./cmd/corpus-ingest --dsn "$SOLVENT_DSN" --ingest corpus-data/etcd-issues.ndjson
+
+  corpus:verify:
+    desc: Print the corpus and ledger gate counts (read-only)
+    dotenv:
+      - scripts/demo/config.env
+    cmds:
+      - go run ./cmd/corpus-ingest --dsn "$SOLVENT_DSN" --verify
+
   test:
     desc: Run the full verification suite
     cmds:
