@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PithomLabs/solvent/internal/kernel"
 	"github.com/PithomLabs/solvent/internal/testdb"
+	"github.com/PithomLabs/solvent/kernel"
 )
 
 // Fixed scenario UUIDs, one per case, so cases cannot interfere and the transcript is

@@ -12,14 +12,16 @@ import (
 
 	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/internal/derive"
-	"github.com/PithomLabs/solvent/internal/kernel"
 	"github.com/PithomLabs/solvent/internal/normalize"
 	"github.com/PithomLabs/solvent/internal/testdb"
+	"github.com/PithomLabs/solvent/kernel"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-const schemaPath = "../../db/001_schema.sql"
+// 002 carries the corpus layer. Applied everywhere so every environment has one
+// schema shape; these packages do not use the corpus tables themselves.
+var schemaPaths = []string{"../../db/001_schema.sql", "../../db/002_corpus.sql"}
 
 var (
 	dsn    string
@@ -33,7 +35,7 @@ func TestMain(m *testing.M) {
 	name, _ := testdb.DBNameFromDSN(dsn)
 	testdb.AcquireResetLock(name)
 
-	if err := testdb.Reset(ctx, dsn, schemaPath); err != nil {
+	if err := testdb.Reset(ctx, dsn, schemaPaths...); err != nil {
 		fmt.Fprintf(os.Stderr, "belief tests cannot start: %v\n", err)
 		testdb.ReleaseResetLock(name)
 		os.Exit(1)

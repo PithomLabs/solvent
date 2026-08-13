@@ -24,7 +24,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // D-019: pgx/v5 is the sole approved driver
 
-	"github.com/PithomLabs/solvent/internal/kernel"
+	"github.com/PithomLabs/solvent/kernel"
 )
 
 type result struct {

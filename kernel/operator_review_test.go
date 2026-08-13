@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/PithomLabs/solvent/internal/kernel"
+	"github.com/PithomLabs/solvent/kernel"
 )
 
 // TestOperatorReview_PromoteWithoutAction verifies that retiring all debts

@@ -17,10 +17,14 @@ import (
 )
 
 const (
-	schemaPath     = "../../db/001_schema.sql"
-	transcriptPath = "../../docs/M2_TRANSCRIPT.md"
-	failurePath    = "../../docs/M2_FAILURE.md"
+	transcriptPath = "../docs/M2_TRANSCRIPT.md"
+	failurePath    = "../docs/M2_FAILURE.md"
 )
+
+// 002 carries the corpus layer. The kernel suite does not use the corpus tables,
+// but applying both files everywhere keeps one schema shape across every
+// environment rather than letting it vary by entry point.
+var schemaPaths = []string{"../db/001_schema.sql", "../db/002_corpus.sql"}
 
 var (
 	dsn    string
@@ -38,7 +42,7 @@ func TestMain(m *testing.M) {
 
 	// The guard lives in testdb.Reset: it refuses any database not named *_test, and
 	// prints the redacted DSN before dropping anything (M2-R1, N1).
-	if err := testdb.Reset(ctx, dsn, schemaPath); err != nil {
+	if err := testdb.Reset(ctx, dsn, schemaPaths...); err != nil {
 		fmt.Fprintf(os.Stderr, "M2 cannot start: %v\n", err)
 		testdb.ReleaseResetLock(name)
 		os.Exit(1)

@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/PithomLabs/solvent/internal/kernel"
 	"github.com/PithomLabs/solvent/internal/pipeline"
 	"github.com/PithomLabs/solvent/internal/view"
+	"github.com/PithomLabs/solvent/kernel"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

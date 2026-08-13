@@ -52,7 +52,10 @@ duplicate in application code:
   plus CHECK `live_requires_promoted`: a row with `state='live'` must have `belief_status='promoted'`.
 - `evidence.provenance_class` ∈ {`external_feed`,`reproducible_artifact`,`live_scan`,
   `operator_asserted`}; `content_sha256` NOT NULL.
-- `belief.embedding` is nullable; the ledger is fully functional with every embedding NULL.
+- There is no `belief.embedding` column. This clause previously described one as
+  "nullable"; the column was never created, and `db/001_schema.sql:3` records the
+  decision ("I-6: no embedding column"). Corrected in Phase 2 as a factual amendment.
+  The ledger carries no vectors at all — see I-6 below.
 
 If any statement below cannot be implemented against this schema without changing it, STOP (§9).
 
@@ -60,7 +63,7 @@ If any statement below cannot be implemented against this schema without changin
 
 ## 4. Kernel API to Implement
 
-Package `internal/kernel`. Signatures and behavioral contracts only. Every write path MUST run
+Package `kernel`. Signatures and behavioral contracts only. Every write path MUST run
 inside `crdb.ExecuteTx` (serialization-failure retry). Error classification MUST use pgx
 SQLSTATE codes, never substring matching on error text.
 
@@ -115,8 +118,17 @@ Exported value required: full starting debt list (the six debt items).
   first being cancelled. (Enforced by ON UPDATE CASCADE propagating status into the intent row,
   which then violates `live_requires_promoted` unless already cancelled.)
 - **I-5** `AuditLiveOnNonPromoted` returns 0 in every committed state.
-- **I-6** All invariant tests pass with every `embedding` column NULL. Vectors are an
-  optimization, never part of belief semantics.
+- **I-6** Vectors are never part of belief semantics. The four ledger tables carry no
+  embedding column and no vector index; promotion, the action gate and the retraction
+  cascade never consult a vector, and every invariant test passes with none present.
+
+  *Scope, clarified in Phase 2:* the corpus layer added by `db/002_corpus.sql`
+  (`corpus_issue`, `belief_corpus_citation`) does carry a `VECTOR(1024)` column and a
+  vector index. That does not weaken I-6, which is a statement about the ledger.
+  Retrieval proposes candidate documents and decides nothing; a corpus hit confers no
+  authority and becomes evidence only when a reviewer attaches it through the kernel's
+  own write paths. `TestW3_B14_I6_NoEmbeddingColumn` continues to assert the ledger
+  side directly.
 - **I-7** Every kernel write goes through `crdb.ExecuteTx`. No raw `db.Exec`/`db.Query` writes.
 - **I-8** `RetractCascade` is a single transaction. Cancel-before-retract ordering is mandatory.
 

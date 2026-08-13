@@ -7,7 +7,7 @@ Every row is a receipt: SQLSTATE from `*pgconn.PgError`, never a substring match
 
 | run fact | value |
 |---|---|
-| generated_at | 2026-08-10T07:20:15Z |
+| generated_at | 2026-08-13T20:09:17Z |
 | host | linux |
 | dsn | postgresql://root@localhost:26260/fable?sslmode=disable |
 | schema | db/001_schema.sql |
@@ -16,28 +16,29 @@ Every row is a receipt: SQLSTATE from `*pgconn.PgError`, never a substring match
 
 ## Verdict
 
-**M0 GREEN** — 16/16 probes passed.
+**M0 GREEN** — 17/17 probes passed.
 
 ## Probes
 
-| id | status | criterion | expected | observed | sqlstate | constraint |
-|---|---|---|---|---|---|---|
-| A1 | PASS | CockroachDB version recorded (contract §6 M0: confirm cluster version) | CockroachDB v26.x | CockroachDB CCL v26.2.0 (x86_64-pc-linux-gnu, built 2026/04/21 18:36:57, go1.25.5) | — | — |
-| A2 | PASS | READ COMMITTED is available on this cluster (contract §7 M0) | true | true | — | — |
-| A3 | PASS | A transaction opened as READ COMMITTED reports READ COMMITTED (not silently upgraded) | read committed | read committed | — | — |
-| A4 | PASS | Default isolation level recorded | serializable | serializable | — | — |
-| B1 | PASS | db/001_schema.sql applies with zero errors (contract §7 M0) | all 6 statements apply | all 6 statements applied | — | — |
-| B2 | PASS | SHOW CREATE TABLE preserves the load-bearing constraints (gate FK ON UPDATE CASCADE, UNIQUE(id,status), both CHECKs, partial index) | snapshot captured; contains ON UPDATE CASCADE, belief_id_status_key, promoted_is_debt_free, live_requires_promoted, live_intents | snapshot captured; all five markers present | — | — |
-| B3 | PASS | Exactly the four contracted tables exist (contract §2) | action_intent, belief, belief_edge, evidence | action_intent, belief, belief_edge, evidence | — | — |
-| B4 | PASS | Schema metadata is byte-identical before and after the D-series cascade (D-025) | byte-identical to the B2 snapshot | identical — cascade did not rewrite metadata | — | — |
-| C1 | PASS | A promoted-with-open-debt UPDATE fails with SQLSTATE 23514 (contract §7 M0; invariant I-1) | refused, SQLSTATE 23514, constraint promoted_is_debt_free | refused with SQLSTATE 23514, constraint promoted_is_debt_free (structured field) | 23514 | promoted_is_debt_free |
-| C2 | PASS | Promoting a final-truth claim fails with SQLSTATE 23514 (invariant I-2) | refused, SQLSTATE 23514, constraint promoted_is_debt_free | refused with SQLSTATE 23514, constraint promoted_is_debt_free (structured field) | 23514 | promoted_is_debt_free |
-| C3 | PASS | A promoted-debt-free UPDATE succeeds (contract §7 M0) | statement succeeds | succeeded | — | — |
-| D1 | PASS | An action intent citing a non-promoted belief is refused by the composite FK (invariant I-3) | refused, SQLSTATE 23503, constraint gate | refused with SQLSTATE 23503, constraint gate (structured field) | 23503 | gate |
-| D2 | PASS | An action intent citing a promoted belief is accepted | statement succeeds | succeeded | — | — |
-| D3 | PASS | Retracting a belief that still carries a live intent is refused (invariant I-4; the §9 high-risk interaction) | refused, SQLSTATE 23514, constraint live_requires_promoted | refused with SQLSTATE 23514, constraint live_requires_promoted (structured field) | 23514 | live_requires_promoted |
-| D4 | PASS | Cancel-then-retract commits in ONE transaction, and ON UPDATE CASCADE propagates the new status into the surviving cancelled intent (invariant I-8) | commits; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | committed; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | — | — |
-| D5 | PASS | AuditLiveOnNonPromoted returns 0 in committed state (invariant I-5) | 0 | 0 | — | — |
+| id | status | criterion | expected | observed | sqlstate | constraint | elapsed_ms |
+|---|---|---|---|---|---|---|---|
+| A1 | PASS | CockroachDB version recorded (contract §6 M0: confirm cluster version) | CockroachDB v26.x | CockroachDB CCL v26.2.0 (x86_64-pc-linux-gnu, built 2026/04/21 18:36:57, go1.25.5) | — | — | 11 |
+| A2 | PASS | READ COMMITTED is available on this cluster (contract §7 M0) | true | true | — | — | 0 |
+| A3 | PASS | A transaction opened as READ COMMITTED reports READ COMMITTED (not silently upgraded) | read committed | read committed | — | — | 0 |
+| A4 | PASS | Default isolation level recorded | serializable | serializable | — | — | 0 |
+| B1 | PASS | db/001_schema.sql applies with zero errors (contract §7 M0) | all 6 statements apply | all 6 statements applied | — | — | 764 |
+| B1 | PASS | db/001_schema.sql applies with zero errors (contract §7 M0) | all 3 statements apply | all 3 statements applied | — | — | 347 |
+| B2 | PASS | SHOW CREATE TABLE preserves the load-bearing constraints (gate FK ON UPDATE CASCADE, UNIQUE(id,status), both CHECKs, partial index) | snapshot captured; contains ON UPDATE CASCADE, belief_id_status_key, promoted_is_debt_free, live_requires_promoted, live_intents | snapshot captured; all five markers present | — | — | 77 |
+| B3 | PASS | Exactly the contracted tables exist: the four frozen ledger tables plus the two corpus tables (contract §2 as amended, D-P2-3) | action_intent, belief, belief_corpus_citation, belief_edge, corpus_issue, evidence | action_intent, belief, belief_corpus_citation, belief_edge, corpus_issue, evidence | — | — | 2 |
+| B4 | PASS | Schema metadata is byte-identical before and after the D-series cascade (D-025) | byte-identical to the B2 snapshot | identical — cascade did not rewrite metadata | — | — | 62 |
+| C1 | PASS | A promoted-with-open-debt UPDATE fails with SQLSTATE 23514 (contract §7 M0; invariant I-1) | refused, SQLSTATE 23514, constraint promoted_is_debt_free | refused with SQLSTATE 23514, constraint promoted_is_debt_free (structured field) | 23514 | promoted_is_debt_free | 1 |
+| C2 | PASS | Promoting a final-truth claim fails with SQLSTATE 23514 (invariant I-2) | refused, SQLSTATE 23514, constraint promoted_is_debt_free | refused with SQLSTATE 23514, constraint promoted_is_debt_free (structured field) | 23514 | promoted_is_debt_free | 1 |
+| C3 | PASS | A promoted-debt-free UPDATE succeeds (contract §7 M0) | statement succeeds | succeeded | — | — | 3 |
+| D1 | PASS | An action intent citing a non-promoted belief is refused by the composite FK (invariant I-3) | refused, SQLSTATE 23503, constraint gate | refused with SQLSTATE 23503, constraint gate (structured field) | 23503 | gate | 1 |
+| D2 | PASS | An action intent citing a promoted belief is accepted | statement succeeds | succeeded | — | — | 2 |
+| D3 | PASS | Retracting a belief that still carries a live intent is refused (invariant I-4; the §9 high-risk interaction) | refused, SQLSTATE 23514, constraint live_requires_promoted | refused with SQLSTATE 23514, constraint live_requires_promoted (structured field) | 23514 | live_requires_promoted | 2 |
+| D4 | PASS | Cancel-then-retract commits in ONE transaction, and ON UPDATE CASCADE propagates the new status into the surviving cancelled intent (invariant I-8) | commits; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | committed; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | — | — | 11 |
+| D5 | PASS | AuditLiveOnNonPromoted returns 0 in committed state (invariant I-5) | 0 | 0 | — | — | 8 |
 
 ## Statements
 
@@ -50,6 +51,8 @@ Every row is a receipt: SQLSTATE from `*pgconn.PgError`, never a substring match
 **A4** — `SHOW default_transaction_isolation`
 
 **B1** — `apply db/001_schema.sql (6 statements)`
+
+**B1** — `apply db/002_corpus.sql (3 statements)`
 
 **B2** — `SHOW CREATE TABLE for all tables, sorted by name`
 
@@ -107,6 +110,18 @@ CREATE TABLE public.belief (
 	CONSTRAINT check_status CHECK (status IN ('entered':::STRING, 'promoted':::STRING, 'retracted':::STRING))
 ) WITH (schema_locked = true);
 
+CREATE TABLE public.belief_corpus_citation (
+	belief_id UUID NOT NULL,
+	corpus_id UUID NOT NULL,
+	distance FLOAT8 NOT NULL,
+	query_text STRING NOT NULL,
+	retrieved_at TIMESTAMPTZ NOT NULL DEFAULT now():::TIMESTAMPTZ,
+	CONSTRAINT belief_corpus_citation_pkey PRIMARY KEY (belief_id ASC, corpus_id ASC),
+	CONSTRAINT belief_corpus_citation_belief_id_fkey FOREIGN KEY (belief_id) REFERENCES public.belief(id),
+	CONSTRAINT belief_corpus_citation_corpus_id_fkey FOREIGN KEY (corpus_id) REFERENCES public.corpus_issue(id),
+	INDEX belief_corpus_citation_corpus (corpus_id ASC)
+) WITH (schema_locked = true);
+
 CREATE TABLE public.belief_edge (
 	parent_id UUID NOT NULL,
 	child_id UUID NOT NULL,
@@ -118,6 +133,24 @@ CREATE TABLE public.belief_edge (
 	INDEX belief_edge_child (child_id ASC),
 	CONSTRAINT check_parent_id_child_id CHECK (parent_id != child_id),
 	CONSTRAINT check_kind CHECK (kind IN ('derives':::STRING, 'contradicts':::STRING))
+) WITH (schema_locked = true);
+
+CREATE TABLE public.corpus_issue (
+	id UUID NOT NULL DEFAULT gen_random_uuid(),
+	scenario_id UUID NOT NULL,
+	issue_number INT8 NOT NULL,
+	title STRING NOT NULL,
+	body STRING NULL,
+	state STRING NOT NULL,
+	url STRING NOT NULL,
+	closed_at TIMESTAMPTZ NULL,
+	content_sha256 STRING NOT NULL,
+	ingested_at TIMESTAMPTZ NOT NULL DEFAULT now():::TIMESTAMPTZ,
+	embedding VECTOR(1024) NULL,
+	CONSTRAINT corpus_issue_pkey PRIMARY KEY (id ASC),
+	UNIQUE INDEX corpus_issue_scenario_number_key (scenario_id ASC, issue_number ASC),
+	VECTOR INDEX corpus_issue_embedding_idx (scenario_id, embedding vector_cosine_ops),
+	CONSTRAINT check_state CHECK (state IN ('open':::STRING, 'closed':::STRING))
 ) WITH (schema_locked = true);
 
 CREATE TABLE public.evidence (

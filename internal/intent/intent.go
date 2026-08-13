@@ -8,7 +8,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/PithomLabs/solvent/internal/kernel"
+	"github.com/PithomLabs/solvent/kernel"
 )
 
 // Propose records a live action intent on a promoted belief.

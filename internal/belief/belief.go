@@ -12,7 +12,7 @@ import (
 	"log/slog"
 
 	"github.com/PithomLabs/solvent/internal/derive"
-	"github.com/PithomLabs/solvent/internal/kernel"
+	"github.com/PithomLabs/solvent/kernel"
 )
 
 // Process translates a single DerivedBelief into kernel operations.
