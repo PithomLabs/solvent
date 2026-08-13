@@ -8,10 +8,11 @@
 #   bash scripts/demo/walkthrough.sh              # interactive (Enter to advance)
 #   bash scripts/demo/walkthrough.sh --auto 6     # auto-advance after 6s
 #   bash scripts/demo/walkthrough.sh --no-pause   # run straight through
-#   bash scripts/demo/walkthrough.sh --from 7     # start at beat 7 (always safe)
+#   bash scripts/demo/walkthrough.sh --from 1     # skip Beat 0, start at CLEAN SLATE
 #
 # --from safety:
-#   1 — always safe (full reset)
+#   0 — needs Claude CLI, MCP binary, CockroachDB running (full MCP prelude)
+#   1 — always safe (full reset) — starts the courtroom walkthrough
 #   2 — needs post-beat-1 state
 #   3 — needs beliefs from beat 2
 #   4 — needs beliefs from beat 2 (same as 3)
@@ -32,7 +33,7 @@ export FABLE_DSN="$SOLVENT_DSN"
 AUTO_MODE=0
 AUTO_DELAY=6
 NO_PAUSE=0
-START_BEAT=1
+START_BEAT=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -86,6 +87,90 @@ narrate() {
   echo
   echo "  $1"
   echo
+}
+
+# ======================================================================
+# BEAT 0 — REAL AGENT → MCP → SOLVENT
+# ======================================================================
+beat0() {
+  banner "STAGE 0 · REAL AGENT → MCP → SOLVENT"
+
+  # Build MCP binary only if missing
+  if [ ! -f "$REPO_ROOT/bin/solvent-mcp" ]; then
+    echo "--- Building MCP server ---"
+    go build -o "$REPO_ROOT/bin/solvent-mcp" "$REPO_ROOT/cmd/solvent-mcp" 2>/dev/null
+  fi
+
+  # Seed database — failures exit immediately (set -euo pipefail)
+  echo "--- Preparing database for MCP prelude ---"
+  task db:reset 2>&1
+  task mcp:seed 2>&1
+  echo
+
+  # Set up isolated agent workspace
+  echo "--- Setting up agent workspace ---"
+  task agent:workspace 2>&1
+  echo
+
+  # Show the agent prompt
+  WORKSPACE="${HOME}/.solvent-agent-box"
+  PROMPT=$(cat "$WORKSPACE/prompt.txt")
+  narrate "Agent prompt:"
+  echo "  \"${PROMPT}\""
+  echo
+
+  # Run the real Claude agent
+  narrate "MCP:"
+  echo "  Running real Claude agent against Solvent..."
+  echo
+
+  JSONL="$WORKSPACE/run_mcp_prelude.jsonl"
+  cd "$WORKSPACE"
+  env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID \
+      -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_MESSAGING_SOCKET \
+      -u CLAUDE_PID -u CLAUDE_EFFORT -u CLAUDE_CODE_EXECPATH \
+    claude -p "$(cat prompt.txt)" \
+      --mcp-config ./solvent-mcp.json \
+      --strict-mcp-config \
+      --tools "" \
+      --allowedTools "mcp__solvent__*" \
+      --model opus \
+      --permission-mode dontAsk \
+      --verbose \
+      --output-format stream-json < /dev/null > "$JSONL" 2>/dev/null
+
+  cd "$REPO_ROOT"
+  echo
+
+  # Extract the real agent conclusion (last assistant message)
+  CONCLUSION=$(python3 -c "
+import json
+last_assistant = None
+with open('$JSONL') as f:
+    for line in f:
+        try:
+            d = json.loads(line.strip())
+            if d.get('type') == 'assistant':
+                last_assistant = d
+        except:
+            pass
+if last_assistant:
+    content = last_assistant.get('message', {}).get('content', [])
+    for c in content:
+        if c.get('type') == 'text':
+            print(c['text'])
+" 2>/dev/null || echo "(could not parse conclusion)")
+
+  # Sanity check: extracted conclusion should be substantive
+  if [ ${#CONCLUSION} -lt 10 ]; then
+    echo "  (WARNING: extracted conclusion is very short — may not be substantive)"
+  fi
+
+  narrate "Agent conclusion:"
+  echo "  ${CONCLUSION}"
+  echo
+
+  pause
 }
 
 # ======================================================================
@@ -438,6 +523,7 @@ echo "  Mode: $([ "$AUTO_MODE" = "1" ] && echo "auto (${AUTO_DELAY}s)" || ([ "$N
 echo "  Starting at beat: ${START_BEAT}"
 echo
 
+if [ "$START_BEAT" -le 0 ]; then beat0; fi
 if [ "$START_BEAT" -le 1 ]; then beat1; fi
 if [ "$START_BEAT" -le 2 ]; then beat2; fi
 if [ "$START_BEAT" -le 3 ]; then beat3; fi

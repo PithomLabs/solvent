@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solvent — Evidence</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    .nav { padding: 1rem 2rem; border-bottom: 1px solid #222; display: flex; gap: 2rem; align-items: center; }
+    .nav a { color: #888; text-decoration: none; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; }
+    .nav a:hover { color: #fff; }
+    .nav .brand { color: #fff; font-weight: 600; font-size: 1rem; letter-spacing: 0.05em; margin-right: auto; }
+    .container { max-width: 800px; margin: 2rem auto; padding: 0 2rem; }
+    h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.15em; color: #666; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid #222; }
+    .row { display: flex; justify-content: space-between; padding: 0.75rem 0; border-bottom: 1px solid #1a1a1a; font-size: 0.85rem; }
+    .row:hover { background: #111; }
+    .code { font-family: 'SF Mono', Menlo, monospace; font-size: 0.75rem; color: #666; word-break: break-all; }
+    .empty { color: #444; font-style: italic; font-size: 0.85rem; padding: 2rem; text-align: center; }
+    a { color: #6af; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <a href="/" class="brand">SOLVENT</a>
+    <a href="/ledger">Ledger</a>
+    <a href="/beliefs">Beliefs</a>
+    <a href="/evidence">Evidence</a>
+    <a href="/intents">Intents</a>
+    <a href="/audit">Audit</a>
+  </nav>
+
+  <div class="container">
+    <h2>Evidence</h2>
+    {{if .}}
+      {{range .}}
+        <div class="row">
+          <a class="code" href="{{.SourceURL}}" target="_blank" rel="noopener noreferrer">{{.SourceURL}}</a>
+        </div>
+      {{end}}
+    {{else}}
+      <div class="empty">No evidence found.</div>
+    {{end}}
+  </div>
+</body>
+</html>
