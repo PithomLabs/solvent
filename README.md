@@ -178,6 +178,14 @@ The gate is in the database schema, not in application code.
   - *Corpus* (`db/002_corpus.sql`): `corpus_issue`, `belief_corpus_citation`. External
     institutional memory with a `VECTOR(1024)` column and a CockroachDB vector index
     prefixed by `scenario_id`. Retrieval proposes candidates; it decides nothing.
+- **Corpus:** the etcd issue history, ingested as unattached external evidence.
+  Captured with `task corpus:fetch` into the gitignored `corpus-data/`, then loaded
+  with `task corpus:ingest`. The snapshot is not vendored: its `.meta.json` sidecar
+  records the capture time, the exact REST parameters, the counts, and a SHA-256 of
+  the NDJSON, so a given corpus state can be cited precisely and the identical
+  artifact can be loaded into more than one database.
+  **No belief is created from the corpus.** Thousands of issues are memory; beliefs
+  stay sparse and are only ever entered through the kernel.
 - **Kernel:** `kernel` — domain-agnostic, all writes through `crdb.ExecuteTx`
 - **Pipeline:** `internal/pipeline` — normalize → derive → belief.Process
 - **CLI:** `cmd/solvent` (pipeline runner), `cmd/operator-review` (debt/promotion/intent)
