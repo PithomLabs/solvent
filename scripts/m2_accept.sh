@@ -49,7 +49,7 @@ echo "== M2 behavioral suite: run 1 =="
   echo '```'
 } > "$TEST_OUT"
 
-if go test ./internal/kernel/ -v -count=1 2>&1 | tee -a "$TEST_OUT"; then
+if go test ./kernel/ -v -count=1 2>&1 | tee -a "$TEST_OUT"; then
   run1=0
 else
   run1=1
@@ -77,7 +77,7 @@ echo "== M2 behavioral suite: run 2 (contract §7 M2 second pass) =="
   echo '```'
 } >> "$TEST_OUT"
 
-if go test ./internal/kernel/ -v -count=1 2>&1 | tee -a "$TEST_OUT"; then
+if go test ./kernel/ -v -count=1 2>&1 | tee -a "$TEST_OUT"; then
   run2=0
 else
   run2=1

@@ -1,7 +1,7 @@
 // Package testdb is the M2 behavioral suite's cluster harness.
 //
 // Verification support. Not part of the public kernel API, and never imported by
-// internal/kernel's non-test files.
+// the kernel package's non-test files.
 //
 // It owns one dangerous operation — dropping and recreating the suite's database —
 // so the guard that makes that safe lives here rather than in a caller.
@@ -138,7 +138,13 @@ func DBNameFromDSN(dsn string) (string, error) {
 //
 // The caller MUST hold AcquireResetLock before calling Reset, and MUST hold it through
 // the entire test suite (m.Run) before calling ReleaseResetLock.
-func Reset(ctx context.Context, dsn, schemaPath string) error {
+// schemaPaths is variadic so a caller can apply the corpus layer (db/002_corpus.sql)
+// alongside the frozen DDL without any existing single-file call site changing.
+// Files are applied in the order given; 002 references belief(id), so 001 comes first.
+func Reset(ctx context.Context, dsn string, schemaPaths ...string) error {
+	if len(schemaPaths) == 0 {
+		return fmt.Errorf("reset %s: no schema files given", Redact(dsn))
+	}
 	name, err := DBName(dsn)
 	if err != nil {
 		return err
@@ -152,7 +158,7 @@ func Reset(ctx context.Context, dsn, schemaPath string) error {
 	// N1: say what is about to be destroyed, before destroying it.
 	fmt.Printf("=== Wave 0 === resetting behavioral test database\n")
 	fmt.Printf("    dsn:      %s\n", Redact(dsn))
-	fmt.Printf("    database: %s  (DROP + CREATE + apply %s)\n", name, schemaPath)
+	fmt.Printf("    database: %s  (DROP + CREATE + apply %s)\n", name, strings.Join(schemaPaths, ", "))
 
 	admin := dsn
 	if u, err := url.Parse(dsn); err == nil {
@@ -173,14 +179,16 @@ func Reset(ctx context.Context, dsn, schemaPath string) error {
 		return fmt.Errorf("create %s: %w", name, err)
 	}
 
-	return ApplySchema(ctx, dsn, schemaPath)
+	return ApplySchema(ctx, dsn, schemaPaths...)
 }
 
-// ApplySchema applies the frozen DDL statement by statement.
-func ApplySchema(ctx context.Context, dsn, schemaPath string) error {
-	raw, err := os.ReadFile(schemaPath)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", schemaPath, err)
+// ApplySchema applies the given DDL files statement by statement, in order.
+//
+// Variadic for the same reason as Reset: db/002_corpus.sql references belief(id),
+// so ordering matters and 001 must be listed first.
+func ApplySchema(ctx context.Context, dsn string, schemaPaths ...string) error {
+	if len(schemaPaths) == 0 {
+		return fmt.Errorf("apply schema: no schema files given")
 	}
 
 	db, err := Open(dsn)
@@ -189,9 +197,15 @@ func ApplySchema(ctx context.Context, dsn, schemaPath string) error {
 	}
 	defer func() { _ = db.Close() }()
 
-	for _, stmt := range splitStatements(string(raw)) {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("apply schema: %w\nstatement: %s", err, stmt)
+	for _, path := range schemaPaths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		for _, stmt := range splitStatements(string(raw)) {
+			if _, err := db.ExecContext(ctx, stmt); err != nil {
+				return fmt.Errorf("apply schema %s: %w\nstatement: %s", path, err, stmt)
+			}
 		}
 	}
 	return nil
@@ -202,7 +216,7 @@ func ApplySchema(ctx context.Context, dsn, schemaPath string) error {
 // semicolon; deliberately not a general SQL parser.
 //
 // Duplicated from internal/m0's applier rather than imported: internal/m0 is frozen at
-// M0's close, and internal/kernel must be able to depend on this package without any
+// M0's close, and the kernel must be able to depend on this package without any
 // path back to it.
 func splitStatements(sqlText string) []string {
 	var cleaned strings.Builder

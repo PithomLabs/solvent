@@ -1,5 +1,5 @@
 // Verification-only. This package is M0's executable specification, not production
-// infrastructure. It must never be imported by internal/kernel (D-023) and is frozen
+// infrastructure. It must never be imported by the kernel package (D-023) and is frozen
 // at the close of M0 (O1).
 package m0
 
@@ -60,7 +60,7 @@ func (r *Runner) FirstFailure() *Probe { return r.first }
 
 // pgErrOf extracts the structured PostgreSQL error. D-019 pins pgx/v5 precisely
 // because *pgconn.PgError carries Code and ConstraintName as fields, and satisfies
-// the interface{ SQLState() string } that internal/kernel classifies through.
+// the interface{ SQLState() string } that the kernel classifies through.
 func pgErrOf(err error) *pgconn.PgError {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {

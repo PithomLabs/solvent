@@ -27,7 +27,7 @@ echo "== E2: harness isolation =="
 echo
 echo "== build =="
 # ./cmd/m0verify specifically, so an unrelated problem in the pre-supplied
-# internal/kernel cannot masquerade as an M0 failure.
+# the kernel package cannot masquerade as an M0 failure.
 go build -o "$BIN" ./cmd/m0verify
 echo "built $(basename "$BIN")"
 

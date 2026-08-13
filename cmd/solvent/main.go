@@ -16,9 +16,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/PithomLabs/solvent/internal/kernel"
 	"github.com/PithomLabs/solvent/internal/pipeline"
 	"github.com/PithomLabs/solvent/internal/testdb"
+	"github.com/PithomLabs/solvent/kernel"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -46,7 +46,7 @@ func main() {
 		if *scenario == "" {
 			fail("--falsify requires --scenario to scope the cascade")
 		}
-		runFalsify(*dsn, *schema, *scenario, *falsify, *reset)
+		runFalsify(*dsn, resolveSchemaPaths(*schema, ""), *scenario, *falsify, *reset)
 		return
 	}
 
@@ -64,19 +64,12 @@ func main() {
 		fail("fixture directory not found: " + fixtureDir)
 	}
 
-	// Resolve schema path: try CWD first, then relative to fixture directory.
-	schemaPath := *schema
-	if _, err := os.Stat(schemaPath); os.IsNotExist(err) {
-		relToFixture := filepath.Join(filepath.Dir(fixtureDir), "..", "..", schemaPath)
-		if _, err2 := os.Stat(relToFixture); err2 == nil {
-			schemaPath = relToFixture
-		}
-	}
+	schemaPaths := resolveSchemaPaths(*schema, fixtureDir)
 
 	ctx := context.Background()
 
 	if *reset {
-		if err := cliReset(ctx, *dsn, schemaPath); err != nil {
+		if err := cliReset(ctx, *dsn, schemaPaths); err != nil {
 			fail(fmt.Sprintf("reset: %v", err))
 		}
 	}
@@ -162,11 +155,11 @@ func main() {
 }
 
 // runFalsify atomically retracts a belief and its cascade, then audits.
-func runFalsify(dsn, schema, scenarioID, beliefID string, reset bool) {
+func runFalsify(dsn string, schemaPaths []string, scenarioID, beliefID string, reset bool) {
 	ctx := context.Background()
 
 	if reset {
-		if err := cliReset(ctx, dsn, schema); err != nil {
+		if err := cliReset(ctx, dsn, schemaPaths); err != nil {
 			fail(fmt.Sprintf("reset: %v", err))
 		}
 	}
@@ -212,7 +205,7 @@ func runFalsify(dsn, schema, scenarioID, beliefID string, reset bool) {
 
 // cliReset drops and recreates the database without the _test suffix guard.
 // This is the CLI equivalent of testdb.Reset, for non-test databases.
-func cliReset(ctx context.Context, dsn, schemaPath string) error {
+func cliReset(ctx context.Context, dsn string, schemaPaths []string) error {
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return fmt.Errorf("parse DSN: %w", err)
@@ -224,7 +217,7 @@ func cliReset(ctx context.Context, dsn, schemaPath string) error {
 
 	fmt.Printf("=== Solvent CLI === resetting database\n")
 	fmt.Printf("    dsn:      %s\n", testdb.Redact(dsn))
-	fmt.Printf("    database: %s  (DROP + CREATE + apply %s)\n", name, schemaPath)
+	fmt.Printf("    database: %s  (DROP + CREATE + apply %s)\n", name, strings.Join(schemaPaths, ", "))
 
 	admin := dsn
 	adminURL, _ := url.Parse(dsn)
@@ -244,7 +237,34 @@ func cliReset(ctx context.Context, dsn, schemaPath string) error {
 		return fmt.Errorf("create %s: %w", name, err)
 	}
 
-	return testdb.ApplySchema(ctx, dsn, schemaPath)
+	return testdb.ApplySchema(ctx, dsn, schemaPaths...)
+}
+
+// resolveSchemaPaths locates the frozen DDL and, beside it, the corpus layer.
+//
+// The frozen path is tried against CWD first, then relative to the fixture
+// directory when one is given. db/002_corpus.sql is appended when it exists next
+// to db/001_schema.sql: --reset drops and recreates the database, so it must
+// restore both files or a reset would silently remove the corpus tables.
+func resolveSchemaPaths(schema, fixtureDir string) []string {
+	schemaPath := schema
+	if _, err := os.Stat(schemaPath); os.IsNotExist(err) && fixtureDir != "" {
+		relToFixture := filepath.Join(filepath.Dir(fixtureDir), "..", "..", schemaPath)
+		if _, err2 := os.Stat(relToFixture); err2 == nil {
+			schemaPath = relToFixture
+		}
+	}
+	paths := []string{schemaPath}
+	if corpus := filepath.Join(filepath.Dir(schemaPath), "002_corpus.sql"); fileExists(corpus) {
+		paths = append(paths, corpus)
+	}
+	return paths
+}
+
+// fileExists reports whether path names an existing file.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // defaultFixtureDir returns the default fixture directory path.
