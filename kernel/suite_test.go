@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	schemaPath     = "../../db/001_schema.sql"
-	transcriptPath = "../../docs/M2_TRANSCRIPT.md"
-	failurePath    = "../../docs/M2_FAILURE.md"
+	schemaPath     = "../db/001_schema.sql"
+	transcriptPath = "../docs/M2_TRANSCRIPT.md"
+	failurePath    = "../docs/M2_FAILURE.md"
 )
 
 var (

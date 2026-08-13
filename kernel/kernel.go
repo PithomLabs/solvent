@@ -1,15 +1,4 @@
-// Package kernel is the transactional belief ledger.
-//
-// The invariants are the schema's, not this package's: db/001_schema.sql enforces
-// I-1 through I-5 with CHECK constraints and a composite foreign key. This package's
-// job is narrower and mechanical — route every write through crdb.ExecuteTx so
-// serialization failures (40001) retry correctly, keep the cascade in ONE
-// transaction with cancel strictly before retract (I-8), and name the database's
-// refusals without ever substituting its own judgement for them.
-//
-// The package imports no driver. Errors are classified through
-// interface{ SQLState() string }, which *pgconn.PgError satisfies; the driver is
-// selected at the cmd/ edge.
+// The package comment lives in doc.go.
 package kernel
 
 import (

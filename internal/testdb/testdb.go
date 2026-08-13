@@ -1,7 +1,7 @@
 // Package testdb is the M2 behavioral suite's cluster harness.
 //
 // Verification support. Not part of the public kernel API, and never imported by
-// internal/kernel's non-test files.
+// the kernel package's non-test files.
 //
 // It owns one dangerous operation — dropping and recreating the suite's database —
 // so the guard that makes that safe lives here rather than in a caller.
@@ -202,7 +202,7 @@ func ApplySchema(ctx context.Context, dsn, schemaPath string) error {
 // semicolon; deliberately not a general SQL parser.
 //
 // Duplicated from internal/m0's applier rather than imported: internal/m0 is frozen at
-// M0's close, and internal/kernel must be able to depend on this package without any
+// M0's close, and the kernel must be able to depend on this package without any
 // path back to it.
 func splitStatements(sqlText string) []string {
 	var cleaned strings.Builder

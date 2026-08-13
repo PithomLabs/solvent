@@ -21,8 +21,8 @@ import (
 	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/internal/derive"
 	"github.com/PithomLabs/solvent/internal/intent"
-	"github.com/PithomLabs/solvent/internal/kernel"
 	"github.com/PithomLabs/solvent/internal/normalize"
+	"github.com/PithomLabs/solvent/kernel"
 )
 
 // Result captures the outcome of processing one evidence item through the pipeline.

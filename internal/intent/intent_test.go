@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/PithomLabs/solvent/internal/intent"
-	"github.com/PithomLabs/solvent/internal/kernel"
 	"github.com/PithomLabs/solvent/internal/testdb"
+	"github.com/PithomLabs/solvent/kernel"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
