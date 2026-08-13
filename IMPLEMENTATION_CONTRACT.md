@@ -60,7 +60,7 @@ If any statement below cannot be implemented against this schema without changin
 
 ## 4. Kernel API to Implement
 
-Package `internal/kernel`. Signatures and behavioral contracts only. Every write path MUST run
+Package `kernel`. Signatures and behavioral contracts only. Every write path MUST run
 inside `crdb.ExecuteTx` (serialization-failure retry). Error classification MUST use pgx
 SQLSTATE codes, never substring matching on error text.
 

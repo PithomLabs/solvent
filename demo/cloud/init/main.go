@@ -20,7 +20,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/PithomLabs/solvent/internal/kernel"
+	"github.com/PithomLabs/solvent/kernel"
 	"github.com/PithomLabs/solvent/internal/pipeline"
 	"github.com/PithomLabs/solvent/internal/testdb"
 	_ "github.com/jackc/pgx/v5/stdlib"

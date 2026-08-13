@@ -1,5 +1,5 @@
 // Verification-only. This package is M0's executable specification, not production
-// infrastructure. It must never be imported by internal/kernel (D-023) and is frozen
+// infrastructure. It must never be imported by the kernel package (D-023) and is frozen
 // at the close of M0 (O1).
 package m0
 

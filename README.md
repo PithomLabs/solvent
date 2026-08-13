@@ -173,7 +173,7 @@ The gate is in the database schema, not in application code.
 ## Architecture
 
 - **Schema:** 4 tables — `belief`, `belief_edge`, `evidence`, `action_intent` (`db/001_schema.sql`)
-- **Kernel:** `internal/kernel` — domain-agnostic, all writes through `crdb.ExecuteTx`
+- **Kernel:** `kernel` — domain-agnostic, all writes through `crdb.ExecuteTx`
 - **Pipeline:** `internal/pipeline` — normalize → derive → belief.Process
 - **CLI:** `cmd/solvent` (pipeline runner), `cmd/operator-review` (debt/promotion/intent)
 - **Substrate:** CockroachDB (serializable isolation)
@@ -184,7 +184,7 @@ The gate is in the database schema, not in application code.
 - `IMPLEMENTATION_CONTRACT.md` — milestone plan
 - `plans/post/` — specs, reviews, implementation reports
 - `db/001_schema.sql` — frozen schema (do not modify)
-- `internal/kernel/` — kernel functions and contract
+- `kernel/` — kernel functions and contract (importable: `github.com/PithomLabs/solvent/kernel`)
 
 ## Invariants
 

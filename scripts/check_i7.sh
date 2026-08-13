@@ -9,7 +9,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-PKG="${I7_PKG:-internal/kernel}"
+PKG="${I7_PKG:-kernel}"
 OUT="${I7_OUT:-docs/M1_I7.md}"
 EXPECT_TX=7   # Enter, AddEvidence, RetireDebt, Promote, IntentOnPromoted, RetractCascade, EnsureBelief
 
