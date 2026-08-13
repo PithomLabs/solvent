@@ -20,9 +20,9 @@ import (
 	"log"
 	"os"
 
-	"github.com/PithomLabs/solvent/kernel"
 	"github.com/PithomLabs/solvent/internal/pipeline"
 	"github.com/PithomLabs/solvent/internal/testdb"
+	"github.com/PithomLabs/solvent/kernel"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -33,6 +33,7 @@ const (
 	baselineEvidenceSHA = "f47656dfaad45b2ecdb32c3169b8897b153d7a8b2453ba8e7c34a2dcde609ce1"
 	deployAction        = "deploy etcd v3.5.0"
 	schemaPath          = "db/001_schema.sql"
+	corpusSchemaPath    = "db/002_corpus.sql"
 	fixtureDir          = "internal/derive/testdata/etcd_real/track2"
 )
 
@@ -53,6 +54,35 @@ func main() {
 		log.Fatalf("ping: %v", err)
 	}
 
+	// 1. Bring the schema up to date. This runs on EVERY start, not just cold ones.
+	//
+	// The previous shape only applied the schema when no tables existed, so a
+	// container redeployed against an already-migrated database skipped migration
+	// entirely and could never acquire tables added after that database was first
+	// created. That is the cloud-only drift class that produced the stale-schema
+	// incidents; db/002_corpus.sql is idempotent by construction (every statement
+	// is IF NOT EXISTS), so applying it unconditionally is a no-op when it is
+	// already present and a migration when it is not.
+	//
+	// Ordering matters: 002 references belief(id), so the frozen DDL comes first.
+	if tablesExist(ctx, db) {
+		fmt.Println("Base tables present. Ensuring corpus schema is current...")
+		if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath); err != nil {
+			log.Fatalf("apply corpus schema: %v", err)
+		}
+	} else {
+		fmt.Println("No tables found. Applying schema...")
+		db.Close()
+		if err := testdb.ApplySchema(ctx, dsn, schemaPath, corpusSchemaPath); err != nil {
+			log.Fatalf("apply schema: %v", err)
+		}
+		db, err = testdb.Open(dsn)
+		if err != nil {
+			log.Fatalf("reopen: %v", err)
+		}
+	}
+
+	// 2. Check canonical state.
 	if canonicalStateExists(ctx, db, scenarioID) {
 		if err := verifyTrack2(ctx, db, scenarioID); err != nil {
 			fmt.Printf("Canonical state exists but verification failed: %v\n", err)
@@ -65,41 +95,36 @@ func main() {
 		return
 	}
 
-	// 2. Check if tables exist.
-	if tablesExist(ctx, db) {
-		if !isDatabaseEmpty(ctx, db) {
-			db.Close()
-			log.Fatal("DATABASE NON-EMPTY BUT NO CANONICAL STATE: STOP — refusing to destroy unknown state")
-		}
-		fmt.Println("Tables exist but empty. Schema already applied, skipping to seed...")
-	} else {
-		fmt.Println("No tables found. Applying schema...")
+	// 3. Tables exist with rows but no canonical state: refuse to guess.
+	if !isDatabaseEmpty(ctx, db) {
 		db.Close()
-		if err := testdb.ApplySchema(ctx, dsn, schemaPath); err != nil {
-			log.Fatalf("apply schema: %v", err)
-		}
-		db, err = testdb.Open(dsn)
-		if err != nil {
-			log.Fatalf("reopen: %v", err)
-		}
+		log.Fatal("DATABASE NON-EMPTY BUT NO CANONICAL STATE: STOP — refusing to destroy unknown state")
 	}
 
-	// 3. Seed.
+	// 4. Seed.
 	seed(ctx, db)
 }
 
 func resetAndSeed(ctx context.Context, db *sql.DB, dsn string) {
-	// Truncate all tables (works without defaultdb access).
-	fmt.Println("Truncating all tables...")
+	// Truncate the ledger (works without defaultdb access).
+	//
+	// TRUNCATE belief CASCADE reaches belief_corpus_citation through its foreign
+	// key, which is correct: a reset scenario should lose its citations.
+	// corpus_issue is deliberately absent from this list and survives -- the corpus
+	// is durable institutional memory, not scenario state.
+	fmt.Println("Truncating ledger tables...")
 	for _, table := range []string{"action_intent", "evidence", "belief_edge", "belief"} {
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("TRUNCATE %s CASCADE", table)); err != nil {
 			fmt.Printf("Warning: truncate %s: %v (may not exist yet)\n", table, err)
 		}
 	}
 
-	// Apply schema (idempotent — tolerates duplicate_table).
-	if err := testdb.ApplySchema(ctx, dsn, schemaPath); err != nil {
-		fmt.Printf("Warning: apply schema: %v\n", err)
+	// Only the corpus layer is re-applied here. The frozen DDL is not idempotent
+	// (no IF NOT EXISTS), so applying it against tables that were just truncated
+	// rather than dropped fails on the first statement and would stop the whole
+	// sequence before reaching 002.
+	if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath); err != nil {
+		fmt.Printf("Warning: apply corpus schema: %v\n", err)
 	}
 
 	// Re-seed.

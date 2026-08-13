@@ -25,6 +25,7 @@ tasks:
       - echo "Resetting database 'fable' on solvent-crdb (DROP DATABASE IF EXISTS fable CASCADE)..."
       - docker exec solvent-crdb cockroach sql --insecure -e "DROP DATABASE IF EXISTS fable CASCADE; CREATE DATABASE fable;"
       - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/001_schema.sql
+      - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/002_corpus.sql
       - echo "Database reset complete."
 
   demo:track1:

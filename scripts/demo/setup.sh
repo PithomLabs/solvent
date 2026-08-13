@@ -85,6 +85,8 @@ docker exec "$SOLVENT_CRDB_CONTAINER" cockroach sql --insecure \
 
 docker exec -i "$SOLVENT_CRDB_CONTAINER" cockroach sql --insecure \
   --database="$SOLVENT_DB_NAME" < "$REPO_ROOT/db/001_schema.sql" >/dev/null
+docker exec -i "$SOLVENT_CRDB_CONTAINER" cockroach sql --insecure \
+  --database="$SOLVENT_DB_NAME" < "$REPO_ROOT/db/002_corpus.sql" >/dev/null
 echo " OK"
 
 # --- Verify ---
