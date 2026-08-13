@@ -62,10 +62,14 @@ func run(dsn, schema, out string, apply, reset, showTimings bool) error {
 	m0.RunEnvironment(ctx, runner)
 
 	if apply {
-		if err := m0.ApplyDDL(ctx, runner, schema); err != nil {
-			// B1 is already recorded as a failure; write the transcript and stop.
-			_ = writeTranscript(out, dsn, schema, runner, showTimings)
-			return reportFirstFailure(runner)
+		// The corpus layer (db/002_corpus.sql) is applied beside the frozen DDL when
+		// present, so probe B3's amended table set matches what is actually created.
+		for _, path := range schemaFiles(schema) {
+			if err := m0.ApplyDDL(ctx, runner, path); err != nil {
+				// B1 is already recorded as a failure; write the transcript and stop.
+				_ = writeTranscript(out, dsn, schema, runner, showTimings)
+				return reportFirstFailure(runner)
+			}
 		}
 	}
 
@@ -148,4 +152,14 @@ func redact(dsn string) string {
 func fail(msg string) {
 	fmt.Fprintln(os.Stderr, msg)
 	os.Exit(1)
+}
+
+// schemaFiles returns the frozen DDL and, when it exists beside it, the corpus layer.
+func schemaFiles(schema string) []string {
+	paths := []string{schema}
+	corpus := filepath.Join(filepath.Dir(schema), "002_corpus.sql")
+	if _, err := os.Stat(corpus); err == nil {
+		paths = append(paths, corpus)
+	}
+	return paths
 }

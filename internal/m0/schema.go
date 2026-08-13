@@ -13,8 +13,24 @@ import (
 	"time"
 )
 
-// expectedTables is contract §2: exactly four tables, no more.
-var expectedTables = []string{"action_intent", "belief", "belief_edge", "evidence"}
+// expectedTables is contract §2, as amended in Phase 2 (D-P2-3).
+//
+// The first four are the frozen ledger and are unchanged. The two corpus tables
+// were authorised by the Phase 0 table waiver (D-P0-1): external issues cannot
+// live in evidence, because evidence.belief_id is NOT NULL, and a corpus row
+// exists before any belief is formed about it.
+//
+// The order here is the catalog's, not a grouping: RecordTableCount compares this
+// slice to "ORDER BY table_name" with position-by-position equality, so it must be
+// sorted. Corpus tables are marked in the trailing comments.
+var expectedTables = []string{
+	"action_intent",
+	"belief",
+	"belief_corpus_citation", // corpus layer
+	"belief_edge",
+	"corpus_issue", // corpus layer
+	"evidence",
+}
 
 // ApplyDDL runs db/001_schema.sql statement by statement. The DDL is frozen; this
 // function may not rewrite it, only execute it. Any error aborts M0 (B1).
@@ -133,7 +149,8 @@ func RecordSchemaSnapshot(ctx context.Context, r *Runner) string {
 	return snap
 }
 
-// RecordTableCount runs B3: contract §2 permits exactly four tables.
+// RecordTableCount runs B3: contract §2 as amended (D-P2-3) permits the four frozen
+// ledger tables plus the two corpus tables, and nothing else.
 func RecordTableCount(ctx context.Context, r *Runner) {
 	start := time.Now()
 	names, err := tableNames(ctx, r.DB())
@@ -141,7 +158,7 @@ func RecordTableCount(ctx context.Context, r *Runner) {
 
 	p := Probe{
 		ID:        "B3",
-		Criterion: "Exactly the four contracted tables exist (contract §2)",
+		Criterion: "Exactly the contracted tables exist: the four frozen ledger tables plus the two corpus tables (contract §2 as amended, D-P2-3)",
 		Statement: "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name",
 		Expected:  strings.Join(expectedTables, ", "),
 		Observed:  strings.Join(names, ", "),

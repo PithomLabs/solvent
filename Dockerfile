@@ -9,6 +9,7 @@ RUN go mod download
 
 COPY cmd/ cmd/
 COPY internal/ internal/
+COPY kernel/ kernel/
 COPY db/ db/
 COPY demo/ demo/
 
