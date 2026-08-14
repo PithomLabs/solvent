@@ -3,6 +3,7 @@ package wizard
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -19,6 +20,19 @@ import (
 // must not assert a table that a judge could then fail to find, so the wording says
 // what is missing and what to do about it instead.
 const NoCitationDetail = "no citation for needContradictionSweep — select evidence in Search first"
+
+// SpentCitationDetail is the refusal for a retrieval check that has citations to look
+// at but none left to claim.
+//
+// The two retrieval debts are independent obligations. Letting one citation retire both
+// would mean the provenance check and the contradiction sweep could be answered by the
+// same issue, which is not a sweep -- and the receipts on screen would then name a row
+// that did not pay that debt. So each retrieval check consumes its own citation, and
+// running out is a refusal rather than a silent reuse.
+func SpentCitationDetail(item string) string {
+	return "no citation left for " + item +
+		" — every selected result is already cited by another check; select another result in Search"
+}
 
 // Discharge retires one debt item, recording the artifact that justifies it.
 //
@@ -73,6 +87,21 @@ func (s *Server) dischargeFromCitation(ctx context.Context, scenarioID, beliefID
 		// but the verdict carries no constraint name precisely because no constraint
 		// produced it. Claiming one would be inventing engine output.
 		v := Verdict{Statement: StmtDischarge, SQLState: "23514", Detail: NoCitationDetail}
+		if err := s.logRefusal(ctx, scenarioID, StmtDischarge, v); err != nil {
+			v.Detail = fmt.Sprintf("%s (refusal_log write failed: %v)", v.Detail, err)
+		}
+		return v
+	}
+
+	// One citation per retrieval debt. The caller has already established that `item`
+	// is still outstanding, so every retrieval check already retired has spoken for a
+	// citation, and this one needs a citation beyond those.
+	spent, err := s.retrievalDebtsRetired(ctx, beliefID)
+	if err != nil {
+		return s.refuse(ctx, scenarioID, StmtDischarge, err, "")
+	}
+	if n <= spent {
+		v := Verdict{Statement: StmtDischarge, SQLState: "23514", Detail: SpentCitationDetail(item)}
 		if err := s.logRefusal(ctx, scenarioID, StmtDischarge, v); err != nil {
 			v.Detail = fmt.Sprintf("%s (refusal_log write failed: %v)", v.Detail, err)
 		}
@@ -135,6 +164,43 @@ func artifactFromRef(ref string) string {
 		return ""
 	}
 	return got
+}
+
+// retrievalDebtsRetired counts how many of the two retrieval checks are already
+// discharged, which is how many citations are already spoken for.
+//
+// It reads the debt array rather than the evidence table because a citation-backed
+// discharge writes no evidence row -- the citation IS the record. The same unnest
+// checks() uses, so the count and the receipts can never disagree.
+func (s *Server) retrievalDebtsRetired(ctx context.Context, beliefID string) (int, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT unnest(debt) FROM belief WHERE id = $1::UUID`, beliefID)
+	if err != nil {
+		return 0, fmt.Errorf("wizard: read debt for retrieval count: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	outstanding := map[string]bool{}
+	for rows.Next() {
+		var d sql.NullString
+		if err := rows.Scan(&d); err != nil {
+			return 0, fmt.Errorf("wizard: scan debt for retrieval count: %w", err)
+		}
+		if d.Valid {
+			outstanding[d.String] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	n := 0
+	for item := range retrievalChecks {
+		if !outstanding[item] {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (s *Server) debtOutstanding(ctx context.Context, beliefID, item string) (bool, error) {

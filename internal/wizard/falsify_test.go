@@ -21,7 +21,7 @@ func atFalsify(t *testing.T, s *wizard.Server) (sid, bid string) {
 
 	s.Promote(ctx, sid, bid)
 	s.Authorize(ctx, sid, bid)
-	selectFirstHit(t, s, sid, bid, "falsify setup")
+	selectHits(t, s, bid, "falsify setup", 2)
 	for _, item := range kernel.FullDebt {
 		if v := s.Discharge(ctx, sid, bid, item, operatorArtifacts[item]); !v.OK {
 			t.Fatalf("setup: discharge %s: %+v", item, v)
@@ -342,9 +342,12 @@ func TestW27_Screen3OverHTTP(t *testing.T) {
 	c.do(http.MethodPost, wizard.Prefix+"/api/authorize", "{}")
 	_, sr := c.do(http.MethodPost, wizard.Prefix+"/api/search", `{"query":"http screen3"}`)
 	hits, _ := sr["hits"].([]any)
-	h0 := hits[0].(map[string]any)
-	c.do(http.MethodPost, wizard.Prefix+"/api/select",
-		`{"corpus_id":"`+h0["corpus_id"].(string)+`","query":"http screen3","distance":`+jsonNum(h0["distance"])+`,"on":true}`)
+	// Two selections: each retrieval check consumes its own citation.
+	for i := 0; i < 2 && i < len(hits); i++ {
+		h := hits[i].(map[string]any)
+		c.do(http.MethodPost, wizard.Prefix+"/api/select",
+			`{"corpus_id":"`+h["corpus_id"].(string)+`","query":"http screen3","distance":`+jsonNum(h["distance"])+`,"on":true}`)
+	}
 	for _, item := range kernel.FullDebt {
 		c.do(http.MethodPost, wizard.Prefix+"/api/discharge",
 			`{"check":"`+item+`","artifact":"`+operatorArtifacts[item]+`"}`)

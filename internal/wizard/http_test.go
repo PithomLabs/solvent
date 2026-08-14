@@ -136,11 +136,18 @@ func TestW16_EndToEndOverHTTP(t *testing.T) {
 	if len(hits) == 0 {
 		t.Fatalf("no hits: %v", sr)
 	}
-	h0 := hits[0].(map[string]any)
-	sel := `{"corpus_id":"` + h0["corpus_id"].(string) + `","query":"http flow","distance":` +
-		jsonNum(h0["distance"]) + `,"on":true}`
-	if w, _ := c.do(http.MethodPost, wizard.Prefix+"/api/select", sel); w.Code != http.StatusOK {
-		t.Fatalf("select = %d: %s", w.Code, w.Body.String())
+	// Two selections: the provenance check and the contradiction sweep each consume
+	// their own citation, so one hit is not enough to clear the full debt.
+	if len(hits) < 2 {
+		t.Fatalf("hits = %d, need 2 for the two retrieval checks", len(hits))
+	}
+	for _, raw := range hits[:2] {
+		h := raw.(map[string]any)
+		sel := `{"corpus_id":"` + h["corpus_id"].(string) + `","query":"http flow","distance":` +
+			jsonNum(h["distance"]) + `,"on":true}`
+		if w, _ := c.do(http.MethodPost, wizard.Prefix+"/api/select", sel); w.Code != http.StatusOK {
+			t.Fatalf("select = %d: %s", w.Code, w.Body.String())
+		}
 	}
 
 	// The contradiction sweep is discharged from the citation; the rest take artifacts.
