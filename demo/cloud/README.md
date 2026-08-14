@@ -116,6 +116,35 @@ curl https://byb43s8nh2.us-west-2.awsapprunner.com/health
 curl -s https://byb43s8nh2.us-west-2.awsapprunner.com/ | head -5
 ```
 
+### Required: a Bedrock instance role
+
+`/demo` search calls Amazon Bedrock at request time. App Runner grants the container no AWS
+access by default — `AppRunnerECRAccessRole` only pulls the image — so without an **instance
+role** the search returns an explicit permission error naming the missing permission. There is
+no fallback by design: no cached vectors, no synthetic embedding, nothing that would make a
+broken deployment look healthy.
+
+```bash
+# 1. a role trusting tasks.apprunner.amazonaws.com
+# 2. a policy allowing ONLY bedrock:InvokeModel on
+#    arn:aws:bedrock:us-west-2::foundation-model/amazon.titan-embed-text-v2:0
+# 3. attach it to the service
+aws apprunner update-service --service-arn <arn> \
+  --instance-configuration InstanceRoleArn=<role-arn>
+```
+
+Verify by evaluation rather than by reading the policy — the negative case is the useful half:
+
+```bash
+aws iam simulate-principal-policy --policy-source-arn <role-arn> \
+  --action-names bedrock:InvokeModel \
+  --resource-arns arn:aws:bedrock:us-west-2::foundation-model/amazon.titan-embed-text-v2:0
+# allowed;  and implicitDeny for any other model
+```
+
+`task deploy` re-asserts this role after every `update-service` and fails if it is missing,
+because `--source-configuration` replaces rather than merges.
+
 ## Fallback: ECS Fargate
 
 If App Runner cannot reach CockroachDB:
@@ -147,6 +176,12 @@ docker build -t solvent-web .
 | `/intents` | GET | List all action intents |
 | `/audit` | GET | Safety audit (live intents on unpromoted beliefs) |
 | `/health` | GET | Health check (real DB ping) |
+| `/demo` | GET | **The three-screen decision wizard** (`internal/wizard`) — the demo a judge should open |
+| `/demo/api/*` | POST | The wizard's actions: search, select, discharge, promote, authorize, introduce, retract, reset |
+| `/proof` | GET | The three-cell isolation experiment, transcripts embedded at build time |
+
+`GET /demo` renders only; it writes nothing. A scenario is created on the visitor's first
+*action*, so crawlers, uptime monitors and link previews cannot author ledger rows.
 
 ## Verification Checklist
 
@@ -154,8 +189,11 @@ docker build -t solvent-web .
 - [x] Landing page shows live counts (not hardcoded)
 - [x] All pages render correctly
 - [x] Public URL accessible from external machine
-- [x] No write operations exposed
-- [x] No runtime external feeds
+- [x] Writes are confined to the wizard's own per-visitor scenario — the ledger pages are
+      read-only and scenario-filtered, pinned by W-32
+- [x] `GET` is non-mutating: 60 cookie-less GETs write nothing (W-31)
+- [x] No runtime external feeds — `/demo/api/introduce` resolves issues from the ingested
+      corpus and has no HTTP client
 - [x] Seed survives restart (no re-seed)
 - [x] Second seed attempt is idempotent
 
@@ -178,7 +216,13 @@ FABLE_DSN="postgresql://root@localhost:26260/fable?sslmode=disable" go run ./dem
 
 ## What This Is Not
 
-- This is **not** a new Solvent implementation.
+- This is **not** a new Solvent implementation. Every write goes through the existing kernel.
 - This is **not** a physics adapter.
 - This is **not** a live agent endpoint.
-- This is a **read-only cloud packaging** of the existing verified Solvent kernel.
+
+**It is no longer read-only.** Earlier revisions of this file described the service as a
+"read-only cloud packaging" and ticked "No write operations exposed". That stopped being true
+when `/demo` shipped: the wizard writes beliefs, evidence, citations, intents and refusals
+through the kernel, which is the entire point of it — a judge drives real transactions and the
+database refuses them. Writes are confined to the visitor's own `scenario_id`; the four
+read-only ledger pages are filtered to Track 2 and cannot be moved by wizard traffic.

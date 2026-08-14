@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 
 	"github.com/PithomLabs/solvent/internal/testdb"
+	"github.com/PithomLabs/solvent/kernel"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -125,8 +126,12 @@ func main() {
 	}, toolHandler("solvent_ingest_evidence"))
 
 	server.AddTool(&mcp.Tool{
-		Name:        "solvent_retire_debt",
-		Description: "Record that one review obligation on a belief has been discharged. Valid items: needProvenanceCheck, needContradictionSweep, needBlastRadius, needRollbackPlan, needVersionPin, needOperatorSignoff. Retiring an item that is already absent is a no-op, not an error.",
+		Name: "solvent_retire_debt",
+		// The valid items are no longer restated in prose. They were, and the prose was
+		// one of five hand-copies of kernel.FullDebt; the Phase 5 vocabulary rename had
+		// to find every one of them. The enum below is generated from the kernel, so
+		// this description can only describe behaviour, not enumerate values.
+		Description: "Record that one review obligation on a belief has been discharged. debt_item must be one of the six items the database issued (see the enum). An unrecognised item is refused rather than silently ignored.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -140,8 +145,13 @@ func main() {
 					"description": "UUID of the belief",
 				},
 				"debt_item": map[string]any{
-					"type":        "string",
-					"description": "Debt item to retire (e.g. needProvenanceCheck)",
+					"type": "string",
+					// Generated, not transcribed. Advertising the vocabulary to the agent
+					// is only half the job: this SDK's low-level AddTool does not validate
+					// arguments against the schema, so the enum is documentation and
+					// handleSolventRetireDebt does the refusing.
+					"enum":        kernel.FullDebt,
+					"description": "Debt item to retire. Must be one of the six the database issued.",
 				},
 			},
 			"required": []string{"scenario", "belief_id", "debt_item"},

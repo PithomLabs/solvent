@@ -54,6 +54,7 @@ type Refusal struct {
 // State is the whole of what the frontend knows. There is no other source.
 type State struct {
 	Screen         string     `json:"screen"`
+	Seeded         bool       `json:"seeded"`
 	ScenarioID     string     `json:"scenario_id"`
 	Claim          string     `json:"claim"`
 	BeliefID       string     `json:"belief_id"`
@@ -97,11 +98,61 @@ var retrievalChecks = map[string]bool{
 // refusal when none exists.
 const ContradictionCheck = "needContradictionSweep"
 
+// ProjectedState is what screen 1 looks like before anything has been written.
+//
+// It exists so that reading the wizard is not the same as using it. A cookie-less GET
+// used to mint and seed a scenario, which meant a crawler, an uptime monitor or a link
+// preview wrote 2 beliefs, 1 edge and 1 evidence row into the ledger -- observed live,
+// twice, on great-goat. Now nothing is written until the judge acts.
+//
+// The projection is honest rather than decorative: every value on screen 1 is a
+// deterministic constant of Seed, so this returns exactly what Seed would have produced
+// -- the same claims, the same status, the same six debt items in the same order, and a
+// real corpus count read from the database. The page a judge sees before their first
+// click is therefore identical to the page after it, and W30 asserts that equality
+// rather than trusting this comment.
+//
+// The one thing it cannot project is an id, because no row exists to have one. BeliefID
+// and ScenarioID stay empty, Seeded is false, and every mutating endpoint routes through
+// resolve, which creates for real before it writes.
+func (s *Server) ProjectedState(ctx context.Context) (State, error) {
+	st := State{
+		Seeded:         false,
+		Claim:          DescendantClaim,
+		Status:         "entered",
+		Debt:           len(kernel.FullDebt),
+		Ancestor:       AncestorClaim,
+		AncestorStatus: "promoted",
+		Citations:      []Citation{},
+		Refusals:       []Refusal{},
+	}
+	for _, item := range kernel.FullDebt {
+		st.Checks = append(st.Checks, Check{
+			Item:      item,
+			Name:      item,
+			Prompt:    checkPrompts[item],
+			Retrieval: retrievalChecks[item],
+		})
+	}
+	// Read-only, and the only query on this path.
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM corpus_issue WHERE scenario_id = $1::UUID`, s.corpus).Scan(&st.CorpusRows); err != nil {
+		return st, fmt.Errorf("wizard: count corpus: %w", err)
+	}
+	st.Screen = deriveScreen(st)
+	return st, nil
+}
+
 // State computes the screen from committed state. Nothing here reads a cookie, a
 // session, or anything the browser sent beyond the scenario id.
+//
+// An unseeded scenario is not an error: it returns ProjectedState. A cookie naming a
+// scenario that was destroyed out from under it therefore degrades to screen 1 rather
+// than to a 500, and the judge's next action repairs it under a fresh id.
 func (s *Server) State(ctx context.Context, scenarioID string) (State, error) {
 	var st State
 	st.ScenarioID = scenarioID
+	st.Seeded = true
 
 	// The belief under examination is the CHILD of the scenario's single edge.
 	//
@@ -118,7 +169,10 @@ func (s *Server) State(ctx context.Context, scenarioID string) (State, error) {
 		 ORDER BY e.filed_at
 		 LIMIT 1`, scenarioID).Scan(&st.BeliefID, &st.Claim, &st.Status, &st.Debt, &st.Ancestor, &st.AncestorStatus)
 	if err == sql.ErrNoRows {
-		return st, fmt.Errorf("wizard: scenario %s is not seeded", scenarioID)
+		// Unseeded, or seeded and since destroyed. Either way the judge gets screen 1,
+		// and the scenario id is deliberately dropped: whatever that cookie names is not
+		// usable, so the next POST mints a fresh one rather than writing into a ghost.
+		return s.ProjectedState(ctx)
 	}
 	if err != nil {
 		return st, fmt.Errorf("wizard: read belief: %w", err)

@@ -1,6 +1,7 @@
 package wizard_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -50,9 +51,9 @@ func (c *client) do(method, path, body string) (*httptest.ResponseRecorder, map[
 	return w, out
 }
 
-// --- W-15: the shell renders and establishes a scenario ------------------------
+// --- W-15: the shell renders, and writes nothing -------------------------------
 
-func TestW15_ShellSetsACookieAndSeedsLazily(t *testing.T) {
+func TestW15_ShellRendersWithoutSeeding(t *testing.T) {
 	s := newServer(t, &fakeEmbedder{})
 	c := newClient(t, s)
 
@@ -60,8 +61,10 @@ func TestW15_ShellSetsACookieAndSeedsLazily(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("GET %s = %d, want 200; body: %s", wizard.Prefix, w.Code, w.Body.String())
 	}
-	if len(c.jar) == 0 {
-		t.Fatal("no cookie set; the wizard has no scenario to work in")
+	// The page is readable without becoming a writer. A GET that seeds makes every
+	// crawler, uptime monitor and link preview a ledger author.
+	if len(c.jar) != 0 {
+		t.Error("GET set a cookie; the shell must not establish a scenario")
 	}
 	html := w.Body.String()
 	for _, want := range []string{"Solvent", "stepper", "/api/state", "ASK", "DISCHARGE", "FALSIFY"} {
@@ -77,7 +80,7 @@ func TestW15_ShellSetsACookieAndSeedsLazily(t *testing.T) {
 		t.Error("shell references a font binary; system stacks only")
 	}
 
-	// The lazy seed happened, so state is immediately available and is ASK.
+	// State is immediately renderable and is ASK — projected, not seeded.
 	w2, st := c.do(http.MethodGet, wizard.Prefix+"/api/state", "")
 	if w2.Code != http.StatusOK {
 		t.Fatalf("GET state = %d: %s", w2.Code, w2.Body.String())
@@ -87,6 +90,12 @@ func TestW15_ShellSetsACookieAndSeedsLazily(t *testing.T) {
 	}
 	if st["claim"] != wizard.DescendantClaim {
 		t.Errorf("claim = %v, want the descendant", st["claim"])
+	}
+	if st["seeded"] != false {
+		t.Errorf("seeded = %v, want false before any action", st["seeded"])
+	}
+	if len(c.jar) != 0 {
+		t.Error("GET /api/state set a cookie; it must not create a scenario")
 	}
 }
 
@@ -168,10 +177,11 @@ func TestW16_EndToEndOverHTTP(t *testing.T) {
 func TestW17_TwoClientsGetSeparateScenarios(t *testing.T) {
 	s := newServer(t, &fakeEmbedder{})
 	a, b := newClient(t, s), newClient(t, s)
-	a.do(http.MethodGet, wizard.Prefix, "")
-	b.do(http.MethodGet, wizard.Prefix, "")
 
+	// Both act, so both hold a real scenario id. If only one did, the other's id would
+	// be the empty string and the inequality below would hold for the wrong reason.
 	a.do(http.MethodPost, wizard.Prefix+"/api/promote", "{}")
+	b.do(http.MethodPost, wizard.Prefix+"/api/search", `{"query":"anything"}`)
 
 	_, sa := a.do(http.MethodGet, wizard.Prefix+"/api/state", "")
 	_, sb := b.do(http.MethodGet, wizard.Prefix+"/api/state", "")
@@ -183,6 +193,10 @@ func TestW17_TwoClientsGetSeparateScenarios(t *testing.T) {
 	}
 	if sb["screen"] != wizard.ScreenAsk {
 		t.Errorf("client b screen = %v, want ASK — a's refusal leaked", sb["screen"])
+	}
+	if sa["scenario_id"] == "" || sb["scenario_id"] == "" {
+		t.Fatalf("a scenario id is empty; both judges must have acted: a=%v b=%v",
+			sa["scenario_id"], sb["scenario_id"])
 	}
 }
 
@@ -263,5 +277,159 @@ func TestW20_EmptyCollectionsSerialiseAsArrays(t *testing.T) {
 	w2, _ := c.do(http.MethodPost, wizard.Prefix+"/api/search", `{"query":"anything"}`)
 	if strings.Contains(w2.Body.String(), `"hits":null`) {
 		t.Error(`"hits" serialised as null`)
+	}
+}
+
+// --- W-30: the projection is faithful, not decorative --------------------------
+//
+// The whole safety argument for a non-writing GET is that the projected screen 1 is
+// indistinguishable from the seeded one. If they ever diverge, the page a judge sees
+// changes under them on their first click -- so this asserts the equality rather than
+// trusting the constants to stay in step.
+func TestW30_ProjectedStateMatchesSeeded(t *testing.T) {
+	ctx := context.Background()
+	s := newServer(t, &fakeEmbedder{})
+
+	projected, err := s.ProjectedState(ctx)
+	if err != nil {
+		t.Fatalf("ProjectedState: %v", err)
+	}
+	actual, err := s.State(ctx, seeded(t, s))
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+
+	if projected.Seeded || !actual.Seeded {
+		t.Errorf("seeded flags wrong: projected=%v actual=%v", projected.Seeded, actual.Seeded)
+	}
+	// Ids cannot be projected -- no row exists to have one. Everything else must match.
+	projected.Seeded, actual.Seeded = false, false
+	projected.ScenarioID, actual.ScenarioID = "", ""
+	projected.BeliefID, actual.BeliefID = "", ""
+
+	pj, _ := json.Marshal(projected)
+	rj, _ := json.Marshal(actual)
+	if string(pj) != string(rj) {
+		t.Errorf("projected screen 1 differs from seeded screen 1\n projected: %s\n seeded   : %s", pj, rj)
+	}
+}
+
+// --- W-31: reading the wizard never writes to the ledger -----------------------
+
+func TestW31_GetsWriteNothing(t *testing.T) {
+	ctx := context.Background()
+	s := newServer(t, &fakeEmbedder{})
+	c := newClient(t, s)
+
+	count := func() (b, e, ed int) {
+		t.Helper()
+		if err := shared.QueryRowContext(ctx, `
+			SELECT (SELECT count(*) FROM belief), (SELECT count(*) FROM evidence),
+			       (SELECT count(*) FROM belief_edge)`).Scan(&b, &e, &ed); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		return
+	}
+
+	b0, e0, ed0 := count()
+	// Twenty cookie-less reads, as a crawler sweeping the site would issue.
+	for i := 0; i < 20; i++ {
+		c.jar = nil
+		if w, _ := c.do(http.MethodGet, wizard.Prefix, ""); w.Code != http.StatusOK {
+			t.Fatalf("GET shell #%d = %d", i, w.Code)
+		}
+		c.jar = nil
+		if w, _ := c.do(http.MethodGet, wizard.Prefix+"/api/state", ""); w.Code != http.StatusOK {
+			t.Fatalf("GET state #%d = %d: %s", i, w.Code, w.Body.String())
+		}
+		c.jar = nil
+		if w, _ := c.do(http.MethodGet, wizard.ProofPath, ""); w.Code != http.StatusOK {
+			t.Fatalf("GET proof #%d = %d", i, w.Code)
+		}
+	}
+	b1, e1, ed1 := count()
+	if b0 != b1 || e0 != e1 || ed0 != ed1 {
+		t.Errorf("60 GETs wrote to the ledger: beliefs %d->%d, evidence %d->%d, edges %d->%d",
+			b0, b1, e0, e1, ed0, ed1)
+	}
+
+	// The first action does create, exactly once.
+	c.jar = nil
+	if w, _ := c.do(http.MethodPost, wizard.Prefix+"/api/promote", "{}"); w.Code == http.StatusServiceUnavailable {
+		t.Fatalf("POST promote = 503: %s", w.Body.String())
+	}
+	b2, e2, ed2 := count()
+	if b2 != b1+2 || e2 != e1+1 || ed2 != ed1+1 {
+		t.Errorf("first action seeded wrong: beliefs %d->%d (want +2), evidence %d->%d (want +1), edges %d->%d (want +1)",
+			b1, b2, e1, e2, ed1, ed2)
+	}
+	if len(c.jar) == 0 {
+		t.Error("the first action set no cookie; the judge would lose their scenario")
+	}
+}
+
+// --- W-33: a cookie naming a destroyed scenario degrades, it does not break ----
+//
+// Scenarios do get destroyed under a live cookie: resetAndSeed's TRUNCATE is not
+// scenario-scoped, and verification runs delete scenarios directly. Before this, State
+// returned an error for an unseeded scenario, handleState turned it into a 500, and the
+// client's bootstrap fetch painted a red error where screen 1 belongs.
+func TestW33_DestroyedScenarioRecovers(t *testing.T) {
+	ctx := context.Background()
+	s := newServer(t, &fakeEmbedder{})
+	c := newClient(t, s)
+
+	// A bystander whose rows must survive the repair.
+	bystander := seeded(t, s)
+
+	// The judge acts once to get a real scenario and cookie, then it is destroyed.
+	c.do(http.MethodPost, wizard.Prefix+"/api/promote", "{}")
+	if len(c.jar) == 0 {
+		t.Fatal("no cookie after the first action")
+	}
+	doomed := c.jar[0].Value
+	for _, q := range []string{
+		`DELETE FROM belief_corpus_citation WHERE belief_id IN (SELECT id FROM belief WHERE scenario_id = $1::UUID)`,
+		`DELETE FROM refusal_log WHERE scenario_id = $1::UUID`,
+		`DELETE FROM action_intent WHERE scenario_id = $1::UUID`,
+		`DELETE FROM belief_edge WHERE parent_id IN (SELECT id FROM belief WHERE scenario_id = $1::UUID)`,
+		`DELETE FROM evidence WHERE scenario_id = $1::UUID`,
+		`DELETE FROM belief WHERE scenario_id = $1::UUID`,
+	} {
+		if _, err := shared.ExecContext(ctx, q, doomed); err != nil {
+			t.Fatalf("destroy scenario: %v", err)
+		}
+	}
+
+	// The stale cookie is still sent. State must project, not 500.
+	w, st := c.do(http.MethodGet, wizard.Prefix+"/api/state", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET state on a destroyed scenario = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if st["screen"] != wizard.ScreenAsk || st["seeded"] != false {
+		t.Errorf("screen = %v seeded = %v, want ASK/false", st["screen"], st["seeded"])
+	}
+
+	// The next action repairs it under a fresh id.
+	if w, _ := c.do(http.MethodPost, wizard.Prefix+"/api/promote", "{}"); w.Code == http.StatusServiceUnavailable {
+		t.Fatalf("POST after destruction = 503: %s", w.Body.String())
+	}
+	repaired := c.jar[0].Value
+	if repaired == doomed {
+		t.Error("repaired into the destroyed scenario id; it should mint a fresh one")
+	}
+	_, st2 := c.do(http.MethodGet, wizard.Prefix+"/api/state", "")
+	if st2["seeded"] != true {
+		t.Errorf("after repair seeded = %v, want true", st2["seeded"])
+	}
+
+	// The repair must not have used a TRUNCATE-shaped path.
+	var n int
+	if err := shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM belief WHERE scenario_id = $1::UUID`, bystander).Scan(&n); err != nil {
+		t.Fatalf("count bystander: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("bystander scenario has %d beliefs, want 2; the repair destroyed someone else's work", n)
 	}
 }
