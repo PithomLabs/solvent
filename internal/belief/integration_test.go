@@ -68,7 +68,7 @@ func TestIntegration_PartialDebtBlocksPromotion(t *testing.T) {
 	ctx := context.Background()
 	sc := integrationScenario(2)
 
-	// Only kev_entry evidence — retires needMap but not the rest.
+	// Only kev_entry evidence — retires needProvenanceCheck but not the rest.
 	b := derive.DerivedBelief{
 		Claim:          "etcd v3.5.x is vulnerable to CVE-2024-24790",
 		Classification: "derived",

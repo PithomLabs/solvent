@@ -325,8 +325,8 @@ beat5() {
   go run "$REPO_ROOT/cmd/operator-review" --dsn "$FABLE_DSN" \
     --scenario "$SOLVENT_SCENARIO_1" --belief "$DERIVED_BELIEF_ID" \
     --action "deploy etcd v3.5.28" \
-    --debt needInvariant --debt needToyCheck --debt needNullModel \
-    --debt needObstruction --debt needFaithfulnessReview 2>&1
+    --debt needContradictionSweep --debt needBlastRadius --debt needRollbackPlan \
+    --debt needVersionPin --debt needOperatorSignoff 2>&1
   echo
 
   narrate "Once the obligations are cleared, the advisory becomes the warrant, and the deployment intent goes live."
@@ -425,7 +425,7 @@ beat7() {
 
   echo "--- Ingesting postmortem + baseline belief ---"
   go run "$REPO_ROOT/cmd/solvent" --dsn "$FABLE_DSN" \
-    --scenario "$SOLVENT_SCENARIO_2" --reset \
+    --scenario "$SOLVENT_SCENARIO_2" --reset --file-demo-edge \
     --fixtures "$REPO_ROOT/internal/derive/testdata/etcd_real/track2" \
     2>&1 | grep -v '^$'
   echo
@@ -445,8 +445,8 @@ beat7() {
   go run "$REPO_ROOT/cmd/operator-review" --dsn "$FABLE_DSN" \
     --scenario "$SOLVENT_SCENARIO_2" --belief "$BELIEF_ID_T2" \
     --action "deploy etcd v3.5.0" \
-    --debt needMap --debt needInvariant --debt needToyCheck \
-    --debt needNullModel --debt needObstruction --debt needFaithfulnessReview 2>&1
+    --debt needProvenanceCheck --debt needContradictionSweep --debt needBlastRadius \
+    --debt needRollbackPlan --debt needVersionPin --debt needOperatorSignoff 2>&1
   echo
 
   echo "--- State before falsification ---"

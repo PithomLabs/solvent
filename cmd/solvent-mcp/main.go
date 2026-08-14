@@ -126,7 +126,7 @@ func main() {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "solvent_retire_debt",
-		Description: "Record that one review obligation on a belief has been discharged. Valid items: needMap, needInvariant, needToyCheck, needNullModel, needObstruction, needFaithfulnessReview. Retiring an item that is already absent is a no-op, not an error.",
+		Description: "Record that one review obligation on a belief has been discharged. Valid items: needProvenanceCheck, needContradictionSweep, needBlastRadius, needRollbackPlan, needVersionPin, needOperatorSignoff. Retiring an item that is already absent is a no-op, not an error.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -141,7 +141,7 @@ func main() {
 				},
 				"debt_item": map[string]any{
 					"type":        "string",
-					"description": "Debt item to retire (e.g. needMap)",
+					"description": "Debt item to retire (e.g. needProvenanceCheck)",
 				},
 			},
 			"required": []string{"scenario", "belief_id", "debt_item"},

@@ -7,37 +7,39 @@ Every row is a receipt: SQLSTATE from `*pgconn.PgError`, never a substring match
 
 | run fact | value |
 |---|---|
-| generated_at | 2026-08-13T20:09:17Z |
+| generated_at | 2026-08-14T09:38:01Z |
 | host | linux |
-| dsn | postgresql://root@localhost:26260/fable?sslmode=disable |
+| dsn | postgresql://root@localhost:26260/fable_m0?sslmode=disable |
 | schema | db/001_schema.sql |
 
 <!-- volatile:end -->
 
 ## Verdict
 
-**M0 GREEN** — 17/17 probes passed.
+**M0 GREEN** — 19/19 probes passed.
 
 ## Probes
 
 | id | status | criterion | expected | observed | sqlstate | constraint | elapsed_ms |
 |---|---|---|---|---|---|---|---|
-| A1 | PASS | CockroachDB version recorded (contract §6 M0: confirm cluster version) | CockroachDB v26.x | CockroachDB CCL v26.2.0 (x86_64-pc-linux-gnu, built 2026/04/21 18:36:57, go1.25.5) | — | — | 11 |
-| A2 | PASS | READ COMMITTED is available on this cluster (contract §7 M0) | true | true | — | — | 0 |
-| A3 | PASS | A transaction opened as READ COMMITTED reports READ COMMITTED (not silently upgraded) | read committed | read committed | — | — | 0 |
+| A1 | PASS | CockroachDB version recorded (contract §6 M0: confirm cluster version) | CockroachDB v26.x | CockroachDB CCL v26.2.0 (x86_64-pc-linux-gnu, built 2026/04/21 18:36:57, go1.25.5) | — | — | 14 |
+| A2 | PASS | READ COMMITTED is available on this cluster (contract §7 M0) | true | true | — | — | 2 |
+| A3 | PASS | A transaction opened as READ COMMITTED reports READ COMMITTED (not silently upgraded) | read committed | read committed | — | — | 1 |
 | A4 | PASS | Default isolation level recorded | serializable | serializable | — | — | 0 |
-| B1 | PASS | db/001_schema.sql applies with zero errors (contract §7 M0) | all 6 statements apply | all 6 statements applied | — | — | 764 |
-| B1 | PASS | db/001_schema.sql applies with zero errors (contract §7 M0) | all 3 statements apply | all 3 statements applied | — | — | 347 |
-| B2 | PASS | SHOW CREATE TABLE preserves the load-bearing constraints (gate FK ON UPDATE CASCADE, UNIQUE(id,status), both CHECKs, partial index) | snapshot captured; contains ON UPDATE CASCADE, belief_id_status_key, promoted_is_debt_free, live_requires_promoted, live_intents | snapshot captured; all five markers present | — | — | 77 |
-| B3 | PASS | Exactly the contracted tables exist: the four frozen ledger tables plus the two corpus tables (contract §2 as amended, D-P2-3) | action_intent, belief, belief_corpus_citation, belief_edge, corpus_issue, evidence | action_intent, belief, belief_corpus_citation, belief_edge, corpus_issue, evidence | — | — | 2 |
-| B4 | PASS | Schema metadata is byte-identical before and after the D-series cascade (D-025) | byte-identical to the B2 snapshot | identical — cascade did not rewrite metadata | — | — | 62 |
-| C1 | PASS | A promoted-with-open-debt UPDATE fails with SQLSTATE 23514 (contract §7 M0; invariant I-1) | refused, SQLSTATE 23514, constraint promoted_is_debt_free | refused with SQLSTATE 23514, constraint promoted_is_debt_free (structured field) | 23514 | promoted_is_debt_free | 1 |
+| B1 | PASS | db/001_schema.sql applies with zero errors (contract §7 M0) | all 6 statements apply | all 6 statements applied | — | — | 861 |
+| B1 | PASS | db/001_schema.sql applies with zero errors (contract §7 M0) | all 3 statements apply | all 3 statements applied | — | — | 424 |
+| B1 | PASS | db/001_schema.sql applies with zero errors (contract §7 M0) | all 4 statements apply | all 4 statements applied | — | — | 798 |
+| B1 | PASS | db/001_schema.sql applies with zero errors (contract §7 M0) | all 1 statements apply | all 1 statements applied | — | — | 6 |
+| B2 | PASS | SHOW CREATE TABLE preserves the load-bearing constraints (gate FK ON UPDATE CASCADE, UNIQUE(id,status), both CHECKs, partial index) | snapshot captured; contains ON UPDATE CASCADE, belief_id_status_key, promoted_is_debt_free, live_requires_promoted, live_intents | snapshot captured; all five markers present | — | — | 126 |
+| B3 | PASS | Exactly the contracted tables exist: the four frozen ledger tables, the two corpus tables, and the wizard refusal log (contract §2 as amended, D-P2-3 and Phase 5) | action_intent, belief, belief_corpus_citation, belief_edge, corpus_issue, evidence, refusal_log | action_intent, belief, belief_corpus_citation, belief_edge, corpus_issue, evidence, refusal_log | — | — | 3 |
+| B4 | PASS | Schema metadata is byte-identical before and after the D-series cascade (D-025) | byte-identical to the B2 snapshot | identical — cascade did not rewrite metadata | — | — | 80 |
+| C1 | PASS | A promoted-with-open-debt UPDATE fails with SQLSTATE 23514 (contract §7 M0; invariant I-1) | refused, SQLSTATE 23514, constraint promoted_is_debt_free | refused with SQLSTATE 23514, constraint promoted_is_debt_free (structured field) | 23514 | promoted_is_debt_free | 3 |
 | C2 | PASS | Promoting a final-truth claim fails with SQLSTATE 23514 (invariant I-2) | refused, SQLSTATE 23514, constraint promoted_is_debt_free | refused with SQLSTATE 23514, constraint promoted_is_debt_free (structured field) | 23514 | promoted_is_debt_free | 1 |
-| C3 | PASS | A promoted-debt-free UPDATE succeeds (contract §7 M0) | statement succeeds | succeeded | — | — | 3 |
+| C3 | PASS | A promoted-debt-free UPDATE succeeds (contract §7 M0) | statement succeeds | succeeded | — | — | 4 |
 | D1 | PASS | An action intent citing a non-promoted belief is refused by the composite FK (invariant I-3) | refused, SQLSTATE 23503, constraint gate | refused with SQLSTATE 23503, constraint gate (structured field) | 23503 | gate | 1 |
-| D2 | PASS | An action intent citing a promoted belief is accepted | statement succeeds | succeeded | — | — | 2 |
-| D3 | PASS | Retracting a belief that still carries a live intent is refused (invariant I-4; the §9 high-risk interaction) | refused, SQLSTATE 23514, constraint live_requires_promoted | refused with SQLSTATE 23514, constraint live_requires_promoted (structured field) | 23514 | live_requires_promoted | 2 |
-| D4 | PASS | Cancel-then-retract commits in ONE transaction, and ON UPDATE CASCADE propagates the new status into the surviving cancelled intent (invariant I-8) | commits; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | committed; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | — | — | 11 |
+| D2 | PASS | An action intent citing a promoted belief is accepted | statement succeeds | succeeded | — | — | 3 |
+| D3 | PASS | Retracting a belief that still carries a live intent is refused (invariant I-4; the §9 high-risk interaction) | refused, SQLSTATE 23514, constraint live_requires_promoted | refused with SQLSTATE 23514, constraint live_requires_promoted (structured field) | 23514 | live_requires_promoted | 3 |
+| D4 | PASS | Cancel-then-retract commits in ONE transaction, and ON UPDATE CASCADE propagates the new status into the surviving cancelled intent (invariant I-8) | commits; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | committed; 2 beliefs retracted; intent reads state='cancelled', belief_status='retracted' | — | — | 13 |
 | D5 | PASS | AuditLiveOnNonPromoted returns 0 in committed state (invariant I-5) | 0 | 0 | — | — | 8 |
 
 ## Statements
@@ -53,6 +55,10 @@ Every row is a receipt: SQLSTATE from `*pgconn.PgError`, never a substring match
 **B1** — `apply db/001_schema.sql (6 statements)`
 
 **B1** — `apply db/002_corpus.sql (3 statements)`
+
+**B1** — `apply db/003_wizard.sql (4 statements)`
+
+**B1** — `apply db/004_debt_vocabulary.sql (1 statements)`
 
 **B2** — `SHOW CREATE TABLE for all tables, sorted by name`
 
@@ -101,7 +107,7 @@ CREATE TABLE public.belief (
 	claim STRING NOT NULL,
 	claim_type STRING NOT NULL,
 	status STRING NOT NULL DEFAULT 'entered':::STRING,
-	debt STRING[] NOT NULL DEFAULT ARRAY['needMap':::STRING, 'needInvariant':::STRING, 'needToyCheck':::STRING, 'needNullModel':::STRING, 'needObstruction':::STRING, 'needFaithfulnessReview':::STRING]:::STRING[],
+	debt STRING[] NOT NULL DEFAULT ARRAY['needProvenanceCheck':::STRING, 'needContradictionSweep':::STRING, 'needBlastRadius':::STRING, 'needRollbackPlan':::STRING, 'needVersionPin':::STRING, 'needOperatorSignoff':::STRING]:::STRING[],
 	final_truth BOOL NOT NULL DEFAULT false,
 	CONSTRAINT belief_pkey PRIMARY KEY (id ASC),
 	UNIQUE INDEX belief_id_status_key (id ASC, status ASC),
@@ -116,10 +122,12 @@ CREATE TABLE public.belief_corpus_citation (
 	distance FLOAT8 NOT NULL,
 	query_text STRING NOT NULL,
 	retrieved_at TIMESTAMPTZ NOT NULL DEFAULT now():::TIMESTAMPTZ,
+	relation STRING NOT NULL DEFAULT 'considered':::STRING,
 	CONSTRAINT belief_corpus_citation_pkey PRIMARY KEY (belief_id ASC, corpus_id ASC),
 	CONSTRAINT belief_corpus_citation_belief_id_fkey FOREIGN KEY (belief_id) REFERENCES public.belief(id),
 	CONSTRAINT belief_corpus_citation_corpus_id_fkey FOREIGN KEY (corpus_id) REFERENCES public.corpus_issue(id),
-	INDEX belief_corpus_citation_corpus (corpus_id ASC)
+	INDEX belief_corpus_citation_corpus (corpus_id ASC),
+	CONSTRAINT citation_relation CHECK (relation IN ('considered':::STRING, 'contradicts':::STRING))
 ) WITH (schema_locked = true);
 
 CREATE TABLE public.belief_edge (
@@ -166,6 +174,19 @@ CREATE TABLE public.evidence (
 	CONSTRAINT evidence_pkey PRIMARY KEY (id ASC),
 	CONSTRAINT evidence_belief_id_fkey FOREIGN KEY (belief_id) REFERENCES public.belief(id),
 	CONSTRAINT check_provenance_class CHECK (provenance_class IN ('external_feed':::STRING, 'reproducible_artifact':::STRING, 'live_scan':::STRING, 'operator_asserted':::STRING))
+) WITH (schema_locked = true);
+
+CREATE TABLE public.refusal_log (
+	id UUID NOT NULL DEFAULT gen_random_uuid(),
+	scenario_id UUID NOT NULL,
+	statement STRING NOT NULL,
+	sqlstate STRING NOT NULL,
+	constraint_name STRING NULL,
+	detail STRING NULL,
+	logged_at TIMESTAMPTZ NOT NULL DEFAULT now():::TIMESTAMPTZ,
+	CONSTRAINT refusal_log_pkey PRIMARY KEY (id ASC),
+	INDEX refusal_log_scenario (scenario_id ASC, logged_at ASC),
+	CONSTRAINT refusal_statement CHECK (statement IN ('promote':::STRING, 'authorize':::STRING, 'discharge':::STRING, 'retract_unsafe':::STRING))
 ) WITH (schema_locked = true);
 ```
 

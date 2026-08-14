@@ -20,6 +20,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/PithomLabs/solvent/internal/demoseed"
 	"github.com/PithomLabs/solvent/internal/pipeline"
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/kernel"
@@ -34,6 +35,8 @@ const (
 	deployAction        = "deploy etcd v3.5.0"
 	schemaPath          = "db/001_schema.sql"
 	corpusSchemaPath    = "db/002_corpus.sql"
+	wizardSchemaPath    = "db/003_wizard.sql"
+	debtSchemaPath      = "db/004_debt_vocabulary.sql"
 	fixtureDir          = "internal/derive/testdata/etcd_real/track2"
 )
 
@@ -60,20 +63,21 @@ func main() {
 	// container redeployed against an already-migrated database skipped migration
 	// entirely and could never acquire tables added after that database was first
 	// created. That is the cloud-only drift class that produced the stale-schema
-	// incidents; db/002_corpus.sql is idempotent by construction (every statement
-	// is IF NOT EXISTS), so applying it unconditionally is a no-op when it is
-	// already present and a migration when it is not.
+	// incidents; db/002_corpus.sql and db/003_wizard.sql are idempotent by
+	// construction (every statement is IF NOT EXISTS), so applying them
+	// unconditionally is a no-op when they are present and a migration when not.
 	//
-	// Ordering matters: 002 references belief(id), so the frozen DDL comes first.
+	// Ordering matters: 002 references belief(id) and 003 alters a 002 table, so the
+	// frozen DDL comes first and 003 comes last.
 	if tablesExist(ctx, db) {
-		fmt.Println("Base tables present. Ensuring corpus schema is current...")
-		if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath); err != nil {
-			log.Fatalf("apply corpus schema: %v", err)
+		fmt.Println("Base tables present. Ensuring corpus and wizard schema are current...")
+		if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath, wizardSchemaPath, debtSchemaPath); err != nil {
+			log.Fatalf("apply corpus/wizard schema: %v", err)
 		}
 	} else {
 		fmt.Println("No tables found. Applying schema...")
 		db.Close()
-		if err := testdb.ApplySchema(ctx, dsn, schemaPath, corpusSchemaPath); err != nil {
+		if err := testdb.ApplySchema(ctx, dsn, schemaPath, corpusSchemaPath, wizardSchemaPath, debtSchemaPath); err != nil {
 			log.Fatalf("apply schema: %v", err)
 		}
 		db, err = testdb.Open(dsn)
@@ -95,10 +99,10 @@ func main() {
 		return
 	}
 
-	// 3. Tables exist with rows but no canonical state: refuse to guess.
-	if !isDatabaseEmpty(ctx, db) {
+	// 3. This scenario holds rows but no canonical state: refuse to guess.
+	if !isDatabaseEmpty(ctx, db, scenarioID) {
 		db.Close()
-		log.Fatal("DATABASE NON-EMPTY BUT NO CANONICAL STATE: STOP — refusing to destroy unknown state")
+		log.Fatalf("SCENARIO %s NON-EMPTY BUT NO CANONICAL STATE: STOP — refusing to destroy unknown state", scenarioID)
 	}
 
 	// 4. Seed.
@@ -119,12 +123,12 @@ func resetAndSeed(ctx context.Context, db *sql.DB, dsn string) {
 		}
 	}
 
-	// Only the corpus layer is re-applied here. The frozen DDL is not idempotent
-	// (no IF NOT EXISTS), so applying it against tables that were just truncated
-	// rather than dropped fails on the first statement and would stop the whole
-	// sequence before reaching 002.
-	if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath); err != nil {
-		fmt.Printf("Warning: apply corpus schema: %v\n", err)
+	// Only the corpus and wizard layers are re-applied here. The frozen DDL is not
+	// idempotent (no IF NOT EXISTS), so applying it against tables that were just
+	// truncated rather than dropped fails on the first statement and would stop the
+	// whole sequence before reaching 002 and 003.
+	if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath, wizardSchemaPath, debtSchemaPath); err != nil {
+		fmt.Printf("Warning: apply corpus/wizard schema: %v\n", err)
 	}
 
 	// Re-seed.
@@ -142,6 +146,20 @@ func seed(ctx context.Context, db *sql.DB) {
 		log.Fatalf("Step 1 pipeline.Run: %v", err)
 	}
 	fmt.Printf("Step 1: processed %d fixture results\n", len(results1))
+
+	// Step 1b: file the one derivation edge. It must come after the fixtures, which
+	// are what create the two claims it connects.
+	//
+	// This is what makes the FALSIFY & AUDIT screen able to demonstrate the stronger
+	// of the two refusals proof/act6_tier_probe.log measured: retracting an ANCESTOR
+	// is refused, not merely retracting the belief that directly carries the intent.
+	fmt.Println("Step 1b: Filing the derivation edge...")
+	filed, err := demoseed.FileDerivationEdge(ctx, db, scenarioID)
+	if err != nil {
+		log.Fatalf("Step 1b FileDerivationEdge: %v", err)
+	}
+	fmt.Printf("Step 1b: edge %q --%s--> %q (newly filed: %t)\n",
+		demoseed.ParentClaim, demoseed.Kind, demoseed.ChildClaim, filed)
 
 	// Step 2: Enter baseline postulated belief.
 	fmt.Println("Step 2: Entering baseline belief...")
@@ -220,11 +238,49 @@ func tablesExist(ctx context.Context, db *sql.DB) bool {
 	return err == nil
 }
 
-func isDatabaseEmpty(ctx context.Context, db *sql.DB) bool {
-	var b, e, i int
-	db.QueryRowContext(ctx, `SELECT count(*) FROM belief`).Scan(&b)
-	db.QueryRowContext(ctx, `SELECT count(*) FROM evidence`).Scan(&e)
-	db.QueryRowContext(ctx, `SELECT count(*) FROM action_intent`).Scan(&i)
+// isDatabaseEmpty reports whether THIS SCENARIO holds no ledger rows.
+//
+// # Why the scenario filter is load-bearing
+//
+// This function guards the log.Fatal below it, and it used to count belief,
+// evidence and action_intent across every scenario. That made the initializer
+// refuse to seed because of rows it had no business caring about — a leftover
+// track1 run, a test scenario, an aborted seed. And the failure was not loud:
+// Dockerfile chains solvent-init and solvent-web, so a dead initializer still let
+// the web process start and serve a completely empty ledger, with every count on
+// the landing page rendering 0. A plausible-looking wrong answer.
+//
+// The question the guard actually needs to ask is "is there unknown state in the
+// scenario I am about to seed?", so that is the question it now asks. Rows in other
+// scenarios are someone else's business and are left strictly alone.
+//
+// Errors are still tolerated rather than returned: an unreadable table means we
+// cannot claim the scenario is empty, so a scan failure must NOT read as "empty".
+// Each count defaults to -1 for exactly that reason.
+//
+// # This guard is now defence-in-depth, and cannot currently fire
+//
+// Scoped this way it is unreachable, and that is worth stating rather than leaving
+// for someone to rediscover. evidence.belief_id and action_intent.belief_id are both
+// NOT NULL foreign keys into belief, so a scenario with zero beliefs necessarily has
+// zero evidence and zero intents. The caller only reaches this check when
+// canonicalStateExists found no beliefs — at which point all three counts are
+// already guaranteed to be zero.
+//
+// It is kept because a scan error must still refuse (the -1 defaults above), and
+// because a future schema that let evidence outlive its belief would make the check
+// live again. The real protection against partial state is verifyTrack2, which
+// checks the shape rather than merely the absence.
+//
+// Note for whoever touches that path next: when verifyTrack2 fails, the caller runs
+// resetAndSeed, whose TRUNCATE is NOT scenario-scoped and will take other scenarios
+// with it. That is a separate defect from the one fixed here and is deliberately
+// untouched.
+func isDatabaseEmpty(ctx context.Context, db *sql.DB, sid string) bool {
+	b, e, i := -1, -1, -1
+	_ = db.QueryRowContext(ctx, `SELECT count(*) FROM belief WHERE scenario_id = $1::UUID`, sid).Scan(&b)
+	_ = db.QueryRowContext(ctx, `SELECT count(*) FROM evidence WHERE scenario_id = $1::UUID`, sid).Scan(&e)
+	_ = db.QueryRowContext(ctx, `SELECT count(*) FROM action_intent WHERE scenario_id = $1::UUID`, sid).Scan(&i)
 	return b == 0 && e == 0 && i == 0
 }
 
@@ -270,6 +326,19 @@ func verifyTrack2(ctx context.Context, db *sql.DB, sid string) error {
 		return fmt.Errorf("expected 3 beliefs, got %d", beliefCount)
 	}
 
-	fmt.Println("Verification: PASSED (3 beliefs, retracted baseline, cancelled intent, audit=0)")
+	// The derivation edge is part of the canonical state, not an optional extra: the
+	// Tier 1 demo path does not exist without it. Checking it here also migrates an
+	// already-deployed database — an older seed without the edge fails verification,
+	// which routes through resetAndSeed and comes back with it.
+	edge, err := demoseed.EdgeExists(ctx, db, sid)
+	if err != nil {
+		return fmt.Errorf("check derivation edge: %w", err)
+	}
+	if !edge {
+		return fmt.Errorf("derivation edge %q --%s--> %q is missing",
+			demoseed.ParentClaim, demoseed.Kind, demoseed.ChildClaim)
+	}
+
+	fmt.Println("Verification: PASSED (3 beliefs, 1 derivation edge, retracted baseline, cancelled intent, audit=0)")
 	return nil
 }

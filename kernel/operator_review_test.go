@@ -155,7 +155,7 @@ func TestOperatorReview_FailedPromotion(t *testing.T) {
 	}
 
 	// Retire only 1 of 6 debts.
-	if err := st.RetireDebt(ctx, beliefID, "needMap"); err != nil {
+	if err := st.RetireDebt(ctx, beliefID, "needProvenanceCheck"); err != nil {
 		t.Fatalf("retire: %v", err)
 	}
 
@@ -217,7 +217,7 @@ func TestOperatorReview_ScenarioGuard_RejectsMismatch(t *testing.T) {
 	}
 
 	// Attempt to retire debts using the WRONG scenario.
-	// This simulates: operator-review --scenario B --belief <belief-in-A> --debt needMap
+	// This simulates: operator-review --scenario B --belief <belief-in-A> --debt needProvenanceCheck
 	// The scenario guard should catch this before any kernel call.
 	var beliefScenario string
 	err = shared.QueryRowContext(ctx,

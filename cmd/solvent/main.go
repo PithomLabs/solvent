@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/PithomLabs/solvent/internal/demoseed"
 	"github.com/PithomLabs/solvent/internal/pipeline"
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/kernel"
@@ -31,6 +32,7 @@ func main() {
 	fixtures := flag.String("fixtures", "", "path to evidence fixture directory (default: internal/derive/testdata relative to repo root)")
 	out := flag.String("out", "", "transcript output path (default: stdout)")
 	falsify := flag.String("falsify", "", "belief ID to retract atomically (RetractCascade); mutually exclusive with --scenario pipeline")
+	fileDemoEdge := flag.Bool("file-demo-edge", false, "after the pipeline runs, file the demo derivation edge (see internal/demoseed)")
 	flag.Parse()
 
 	// Resolve DSN: flag > env > error.
@@ -86,6 +88,18 @@ func main() {
 	results, err := pipeline.Run(ctx, db, *scenario, fixtureDir)
 	if err != nil {
 		fail(fmt.Sprintf("pipeline: %v", err))
+	}
+
+	// The derivation edge is filed here, behind an explicit flag, so the local demo
+	// and the cloud initializer produce the same canonical state from the same code.
+	// The pipeline creates the two claims it connects; nothing else does.
+	if *fileDemoEdge {
+		filed, err := demoseed.FileDerivationEdge(ctx, db, *scenario)
+		if err != nil {
+			fail(fmt.Sprintf("file-demo-edge: %v", err))
+		}
+		fmt.Printf("demo edge: %q --%s--> %q (newly filed: %t)\n",
+			demoseed.ParentClaim, demoseed.Kind, demoseed.ChildClaim, filed)
 	}
 
 	// Audit.
@@ -240,12 +254,18 @@ func cliReset(ctx context.Context, dsn string, schemaPaths []string) error {
 	return testdb.ApplySchema(ctx, dsn, schemaPaths...)
 }
 
-// resolveSchemaPaths locates the frozen DDL and, beside it, the corpus layer.
+// resolveSchemaPaths locates the frozen DDL and, beside it, every layer above it.
 //
-// The frozen path is tried against CWD first, then relative to the fixture
-// directory when one is given. db/002_corpus.sql is appended when it exists next
-// to db/001_schema.sql: --reset drops and recreates the database, so it must
-// restore both files or a reset would silently remove the corpus tables.
+// The frozen path is tried against CWD first, then relative to the fixture directory
+// when one is given. Each later layer is appended when it exists next to
+// db/001_schema.sql, in order, because --reset drops and recreates the database: miss a
+// layer here and the reset silently removes tables the application still expects.
+//
+// That is not hypothetical. When db/003_wizard.sql was added, this function still knew
+// only about 002, so `task demo:track2` — which resets through this path — rebuilt the
+// database without the wizard layer, and the wizard's first query failed with
+// `column "c.relation" does not exist`. Any new layer must be added here as well as to
+// demo/cloud/init, the Taskfile, and every test suite's schemaPaths.
 func resolveSchemaPaths(schema, fixtureDir string) []string {
 	schemaPath := schema
 	if _, err := os.Stat(schemaPath); os.IsNotExist(err) && fixtureDir != "" {
@@ -255,8 +275,11 @@ func resolveSchemaPaths(schema, fixtureDir string) []string {
 		}
 	}
 	paths := []string{schemaPath}
-	if corpus := filepath.Join(filepath.Dir(schemaPath), "002_corpus.sql"); fileExists(corpus) {
-		paths = append(paths, corpus)
+	// Ordered: 002 references belief(id), and 003 alters a table 002 creates.
+	for _, layer := range []string{"002_corpus.sql", "003_wizard.sql", "004_debt_vocabulary.sql"} {
+		if p := filepath.Join(filepath.Dir(schemaPath), layer); fileExists(p) {
+			paths = append(paths, p)
+		}
 	}
 	return paths
 }

@@ -172,7 +172,7 @@ func TestW1_B03_RetireDebt(t *testing.T) {
 
 	id, err := st.EnterBelief(ctx, sc, "claim retiring one debt", kernel.Derived)
 	if err == nil {
-		err = st.RetireDebt(ctx, id, "needToyCheck")
+		err = st.RetireDebt(ctx, id, "needBlastRadius")
 	}
 
 	var stored string
@@ -180,7 +180,7 @@ func TestW1_B03_RetireDebt(t *testing.T) {
 		err = shared.QueryRowContext(ctx,
 			`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, id).Scan(&stored)
 	}
-	want := strings.Join(without(kernel.FullDebt, "needToyCheck"), ",")
+	want := strings.Join(without(kernel.FullDebt, "needBlastRadius"), ",")
 
 	rec.check(t, err == nil && stored == want, Case{
 		ID: "B-03", Wave: "1",
@@ -200,14 +200,14 @@ func TestW1_B04_RetireDebtIdempotent(t *testing.T) {
 
 	id, err := st.EnterBelief(ctx, sc, "claim retiring an absent debt", kernel.Derived)
 	if err == nil {
-		err = st.RetireDebt(ctx, id, "needToyCheck")
+		err = st.RetireDebt(ctx, id, "needBlastRadius")
 	}
 	before := debtString(t, ctx, id)
 
 	// Same item again: absent now, must be a no-op rather than an error.
 	var secondErr error
 	if err == nil {
-		secondErr = st.RetireDebt(ctx, id, "needToyCheck")
+		secondErr = st.RetireDebt(ctx, id, "needBlastRadius")
 	}
 	after := debtString(t, ctx, id)
 
