@@ -9,4 +9,4 @@ package corpus
 // sqlSearch it silently downgraded the plan from a vector search to a full scan
 // while the test stayed green. Tests must EXPLAIN the statement that really runs,
 // not a lookalike.
-var SQLSearchForTest = sqlSearch
+var SQLSearchForTest = SearchSQL()

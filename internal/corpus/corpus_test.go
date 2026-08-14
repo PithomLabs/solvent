@@ -16,7 +16,7 @@ import (
 )
 
 // 002 carries the corpus layer and references belief(id), so 001 is applied first.
-var schemaPaths = []string{"../../db/001_schema.sql", "../../db/002_corpus.sql"}
+var schemaPaths = []string{"../../db/001_schema.sql", "../../db/002_corpus.sql", "../../db/003_wizard.sql", "../../db/004_debt_vocabulary.sql"}
 
 // Scenario namespace for this package. 1111..6666 belong to the kernel, belief,
 // intent and pipeline suites; 7777 is the kernel's lifecycle example.
@@ -363,7 +363,7 @@ func TestC07_CitationConnectsCorpusToBelief(t *testing.T) {
 	}
 
 	for _, h := range hits {
-		if err := corpus.Cite(ctx, shared, beliefID, h.ID, h.Distance, plantedQuery); err != nil {
+		if err := corpus.Cite(ctx, shared, beliefID, h.ID, h.Distance, plantedQuery, corpus.RelationConsidered); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -399,7 +399,7 @@ func TestC07_CitationConnectsCorpusToBelief(t *testing.T) {
 	}
 
 	// Re-citing is idempotent, so replaying retrieval cannot duplicate provenance.
-	if err := corpus.Cite(ctx, shared, beliefID, hits[0].ID, 0.123, plantedQuery); err != nil {
+	if err := corpus.Cite(ctx, shared, beliefID, hits[0].ID, 0.123, plantedQuery, corpus.RelationConsidered); err != nil {
 		t.Fatal(err)
 	}
 	var after int
@@ -423,7 +423,7 @@ func TestC08_CitationRequiresARealBelief(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := corpus.Cite(ctx, shared, "00000000-0000-0000-0000-0000000000ff", corpusID, 0.5, "ghost")
+	err := corpus.Cite(ctx, shared, "00000000-0000-0000-0000-0000000000ff", corpusID, 0.5, "ghost", corpus.RelationConsidered)
 	if err == nil {
 		t.Fatal("a citation naming a non-existent belief was accepted")
 	}

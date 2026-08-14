@@ -1,7 +1,17 @@
-// Command solvent-web is the hosted judge-facing read-only Solvent ledger.
+// Command solvent-web is the hosted judge-facing Solvent demo.
 //
-// It reads from CockroachDB and serves the live ledger state over HTTPS.
-// No write operations are exposed. No external feeds. No authentication.
+// Two surfaces, deliberately separate:
+//
+//   - `/` and its ledger pages are read-only. They read from CockroachDB and serve the
+//     live Track 2 ledger. No writes, no feeds, no authentication.
+//   - `/demo` is the three-screen decision wizard (internal/wizard), which DOES write:
+//     it seeds its own scenario per visitor and drives the kernel's promote, authorize
+//     and debt-retirement paths so a judge can watch the database refuse and accept.
+//
+// The wizard is mounted under a prefix rather than at `/` so the recorded live URL
+// keeps working unchanged. Promoting it to `/` is a later phase, gated on the App
+// Runner service having an instance role that permits bedrock:InvokeModel — without
+// which the wizard's search cannot run at all.
 package main
 
 import (
@@ -15,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/PithomLabs/solvent/internal/wizard"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -61,16 +72,31 @@ func main() {
 	mux.HandleFunc("/audit", handleAudit)
 	mux.HandleFunc("/health", handleHealth)
 
+	// The wizard owns everything under its own prefix and nothing outside it. It fails
+	// soft: if it cannot be constructed the ledger pages still serve, because a judge
+	// arriving at the recorded URL should never meet a dead site.
+	wiz, err := wizard.New(db, wizard.Options{})
+	if err != nil {
+		log.Printf("wizard unavailable, serving ledger only: %v", err)
+	} else {
+		wiz.Routes(mux)
+		log.Printf("wizard mounted at %s", wizard.Prefix)
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
 	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      loggingMiddleware(mux),
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		Addr:        ":" + port,
+		Handler:     loggingMiddleware(mux),
+		ReadTimeout: 5 * time.Second,
+		// 20s, up from 10s. The wizard's search embeds the judge's query with Bedrock
+		// before it can run the ANN query, and a cold serverless cluster adds to that.
+		// The search handler bounds itself to 8s independently, so this is headroom
+		// rather than a licence to hang.
+		WriteTimeout: 20 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

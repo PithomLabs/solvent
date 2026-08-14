@@ -13,8 +13,20 @@
 *.dylib
 
 # Extensionless Linux binaries (e.g. `go build ./cmd/solvent`)
+#
+# These have to be enumerated by name: they have no extension to match on, and a
+# blanket rule would ignore real files. This list was short by three, and the three
+# it missed got committed — 45 MB of unstripped ELF with debug info, 91.7% of every
+# tracked byte in the repository, referenced by nothing. The Dockerfile rebuilds from
+# source into different names, so they were pure weight.
+#
+# `operator-review` in particular is rebuilt into the repo root by
+# scripts/demo/setup.sh on every `task setup`, which is how it kept coming back.
 /solvent
 /solvent-mcp
+/web
+/init
+/operator-review
 /bin/
 
 # Test binary, built with `go test -c`

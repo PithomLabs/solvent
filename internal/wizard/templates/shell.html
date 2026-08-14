@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solvent — decision wizard</title>
+<style>
+/* The database's own words are the only thing on this page that gets colour.
+   Everything the application asserts is achromatic. Two semantic colours total,
+   used only on engine output. Light mode only. */
+:root{
+  --ink:#14140F; --muted:#6E6C64; --faint:#9A9891;
+  --paper:#FBFAF7; --surface:#FFFFFF; --rule:#DDDBD3;
+  --refuse:#A32D2D; --refuse-bg:#FCEBEB;
+  --commit:#3B6D11; --commit-bg:#EAF3DE;
+  /* System stacks. No webfont binaries: the typography distinction is what carries
+     meaning, and it survives without shipping ~100KB of font per face. */
+  --font-sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 15px/1.5 var(--font-sans);
+  -webkit-font-smoothing:antialiased}
+main{max-width:760px;margin:0 auto;padding:32px 24px 72px}
+header{display:flex;align-items:baseline;gap:16px;padding:16px 24px;border-bottom:1px solid var(--rule)}
+header .brand{font-size:13px;letter-spacing:.18em;text-transform:uppercase;font-weight:500}
+header .q{color:var(--muted);font-size:13px;flex:1}
+header a,button.link{color:var(--muted);font-size:11px;background:none;border:0;cursor:pointer;
+  font-family:inherit;text-decoration:none}
+header a:hover,button.link:hover{color:var(--ink)}
+
+/* stepper(reached, current) */
+.stepper{display:flex;gap:28px;padding:12px 24px;border-bottom:1px solid var(--rule);
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.stepper .s{padding-top:6px;border-top:2px solid transparent}
+.stepper .s.reached{color:var(--muted);border-top-color:var(--rule)}
+.stepper .s.current{color:var(--ink);border-top-color:var(--ink)}
+
+h1{font-size:22px;font-weight:500;margin:24px 0 4px}
+.sub{color:var(--muted);font-size:13px;margin:0 0 24px}
+h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
+  font-weight:500;margin:32px 0 8px}
+
+/* row(left, right) — the only layout primitive */
+.row{display:flex;gap:16px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--rule)}
+.row .l{flex:1;min-width:0}
+.row .r{color:var(--muted);text-align:right;white-space:nowrap}
+.row.done .l{color:var(--muted)}
+.mono{font-family:var(--font-mono);font-size:13px;font-variant-numeric:tabular-nums}
+.dim{color:var(--faint)}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+
+/* verdict(kind, sqlstate, constraint, detail) — the loudest thing on the page */
+.verdict{margin:20px 0;padding:12px 14px;font-family:var(--font-mono);font-size:13px;
+  border-left:3px solid}
+.verdict.refuse{background:var(--refuse-bg);border-color:var(--refuse);color:var(--refuse)}
+.verdict.commit{background:var(--commit-bg);border-color:var(--commit);color:var(--commit)}
+.verdict .d{display:block;margin-top:4px;opacity:.85;white-space:pre-wrap;word-break:break-word}
+
+input[type=text]{font:400 14px/1.4 var(--font-sans);padding:7px 9px;border:1px solid var(--rule);
+  background:var(--surface);color:var(--ink);width:100%}
+input[type=text]:focus{outline:none;border-color:var(--muted)}
+button{font:500 13px/1 var(--font-sans);padding:9px 14px;border:1px solid var(--ink);
+  background:var(--surface);color:var(--ink);cursor:pointer}
+button:hover{background:var(--ink);color:var(--paper)}
+button[disabled]{opacity:.4;cursor:default}
+.actions{display:flex;gap:10px;margin:24px 0 0}
+.searchbar{display:flex;gap:10px;align-items:stretch}
+.searchbar input{flex:1}
+label.pick{display:flex;gap:10px;align-items:baseline;cursor:pointer;width:100%}
+footer{margin-top:48px;padding-top:12px;border-top:1px solid var(--rule);color:var(--faint);font-size:11px}
+.err{color:var(--refuse);font-size:13px;margin:8px 0}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">Solvent</span>
+  <span class="q">{{.DefaultQuestion}}</span>
+  <a href="/ledger">Ledger</a>
+  <button class="link" id="reset">Reset</button>
+</header>
+<nav class="stepper" id="stepper">
+  {{range .Steps}}<span class="s" data-step="{{.}}">{{.}}</span>{{end}}
+</nav>
+<main id="app"><p class="sub">Loading…</p></main>
+
+<script>
+// No framework, no bundler, no client-side step counter.
+//
+// The server derives the screen from committed ledger rows and logged refusals on
+// every call, so this file never decides what screen it is on -- it renders whatever
+// /api/state says. Reaching the end by editing this file is unrepresentable: the
+// buttons post statements and the database decides.
+const P = {{.Prefix}};
+const DEFAULT_Q = {{.DefaultQuestion}};
+const app = document.getElementById('app');
+let S = null;              // last /api/state
+let hits = [];             // last search results, for their real distances
+let lastQuery = DEFAULT_Q;
+let verdict = null;        // last engine output, cleared on navigation
+let notice = '';
+let intro = null;          // last introduced contradiction
+let lastIssue = '';
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const dist = d => Number(d).toFixed(6);
+
+async function api(path, body) {
+  const opt = body === undefined
+    ? {}
+    : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)};
+  const r = await fetch(P + path, opt);
+  const j = await r.json().catch(() => ({error:'unreadable response'}));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+async function refresh() {
+  S = await api('/api/state');
+  render();
+}
+
+function stepper() {
+  document.querySelectorAll('#stepper .s').forEach(el => {
+    const order = ['ASK','DISCHARGE','FALSIFY'];
+    const here = order.indexOf(S.screen), mine = order.indexOf(el.dataset.step);
+    el.classList.toggle('current', mine === here);
+    el.classList.toggle('reached', mine < here);
+  });
+}
+
+function verdictHTML() {
+  if (!verdict) return '';
+  const kind = verdict.ok ? 'commit' : 'refuse';
+  const head = verdict.ok
+    ? esc(verdict.statement) + ' -> COMMIT'
+    : 'ERROR ' + esc(verdict.sqlstate || '') + (verdict.constraint ? ' · ' + esc(verdict.constraint) : '');
+  const detail = verdict.ok ? '' : esc(verdict.detail || '');
+  return `<div class="verdict ${kind}">${head}${detail ? `<span class="d">${detail}</span>` : ''}</div>`;
+}
+
+function row(left, right, cls) {
+  return `<div class="row ${cls||''}"><span class="l">${left}</span><span class="r">${right||''}</span></div>`;
+}
+
+function beliefBlock() {
+  return `<h1>${esc(S.claim)}</h1>
+    <p class="sub mono">status ${esc(S.status)} · debt ${S.debt}</p>`;
+}
+
+function checksBlock(editable) {
+  let h = '<h2>Debt</h2>';
+  for (const c of S.checks) {
+    const name = `<span class="mono">${esc(c.name)}</span>`;
+    if (c.done) {
+      h += row(name, `<span class="mono">✓ ${esc(c.receipt || '')}</span>`, 'done');
+    } else if (!editable) {
+      h += row(name, `<span class="dim">${esc(c.prompt)}</span>`);
+    } else if (c.retrieval) {
+      h += row(name, `<button data-dis="${esc(c.item)}" data-retrieval="1">${esc(c.prompt)}</button>`);
+    } else {
+      h += row(name,
+        `<span style="display:flex;gap:8px"><input type="text" data-art="${esc(c.item)}"
+           placeholder="${esc(c.prompt)}" style="width:260px">
+         <button data-dis="${esc(c.item)}">Discharge</button></span>`);
+    }
+  }
+  return h;
+}
+
+function citationsBlock() {
+  if (!S.citations.length) return '';
+  // Two different measurements share a column here, so each says which it is.
+  // A 'considered' citation was surfaced BY a query; a 'contradicts' citation was
+  // introduced by URL and measured against the belief's own claim. Conflating them
+  // would invite a reader to compare numbers that answer different questions.
+  let h = '<h2>Cited</h2>';
+  for (const c of S.citations) {
+    const label = c.relation === 'contradicts'
+      ? 'distance from the belief&#39;s claim'
+      : 'distance from your query';
+    h += row(`<span class="mono">#${c.issue_number}</span> <span class="trunc">${esc(c.title)}</span>`,
+             `<span class="mono">${dist(c.distance)}</span> <span class="dim">${esc(c.relation)}</span>`);
+    h += `<div class="row"><span class="l dim" style="font-size:11px">${label}</span><span class="r"></span></div>`;
+  }
+  return h;
+}
+
+function refusalsBlock() {
+  if (!S.refusals.length) return '';
+  let h = '<h2>Refused, on the record</h2>';
+  for (const r of S.refusals) {
+    h += row(`<span class="mono">${esc(r.statement)}</span>`,
+             `<span class="mono">${esc(r.sqlstate)}${r.constraint ? ' · ' + esc(r.constraint) : ''}</span>`);
+  }
+  return h;
+}
+
+function screenAsk() {
+  let h = `<h2>Institutional memory</h2>
+    <div class="searchbar">
+      <input type="text" id="q" value="${esc(lastQuery)}">
+      <button id="search">Search</button>
+    </div>
+    <p class="sub dim" style="margin-top:8px">
+      <span class="mono">${S.corpus_rows}</span> issues indexed · Amazon Titan V2, 1024-d</p>`;
+  if (notice) h += `<p class="err">${esc(notice)}</p>`;
+  if (hits.length) {
+    h += '<h2>Results</h2>';
+    for (const t of hits) {
+      h += row(
+        `<label class="pick"><input type="checkbox" data-pick="${esc(t.corpus_id)}" ${t.selected?'checked':''}>
+         <span class="mono">#${t.issue_number}</span>
+         <span class="trunc">${esc(t.title)}</span></label>`,
+        `<span class="mono">${dist(t.distance)}</span>`);
+    }
+    h += '<p class="sub dim" style="margin-top:6px">' +
+         '<span class="mono">distance from your query</span></p>';
+    {
+    }
+    h += '<p class="sub dim" style="margin-top:10px">Select the evidence you intend to rely on.</p>';
+  }
+  h += citationsBlock();
+  h += beliefBlock();
+  h += checksBlock(false);
+  h += verdictHTML();
+  h += `<div class="actions">
+      <button id="promote">Promote belief</button>
+      <button id="authorize">Authorize deployment</button>
+    </div>`;
+  h += refusalsBlock();
+  return h;
+}
+
+function screenDischarge() {
+  let h = beliefBlock();
+  if (notice) h += `<p class="err">${esc(notice)}</p>`;
+  h += checksBlock(true);
+  h += citationsBlock();
+  h += verdictHTML();
+  h += `<div class="actions">
+      <button id="promote">Promote belief</button>
+      <button id="authorize">Authorize deployment</button>
+    </div>
+    <p class="sub dim" style="margin-top:18px">Solvent does not judge whether your evidence
+      was good. It records what you cited, how close it was, and makes that permanent.</p>`;
+  h += refusalsBlock();
+  return h;
+}
+
+function screenFalsify() {
+  const terminal = S.status === 'retracted';
+  let h = beliefBlock();
+
+  if (!terminal) {
+    h += `<h2>Introduce a contradiction</h2>
+      <div class="searchbar">
+        <input type="text" id="issue" placeholder="https://github.com/etcd-io/etcd/issues/13766"
+               value="${esc(lastIssue)}">
+        <button id="introduce">Introduce as evidence</button>
+      </div>
+      <p class="sub dim" style="margin-top:8px">Resolved from the ingested corpus. No outbound request.</p>`;
+  }
+  if (notice) h += `<p class="err">${esc(notice)}</p>`;
+
+  if (intro) {
+    h += row(`<span class="mono">#${intro.issue_number}</span> <span class="trunc">${esc(intro.title)}</span>`,
+             `<span class="mono">${esc(intro.state)}${intro.closed_at ? ' ' + esc(intro.closed_at) : ''}</span>`);
+    h += row(`<span class="mono">${dist(intro.distance)}</span> <span class="dim">relation: ${esc(intro.relation)}</span>`,
+             `<span class="dim" style="font-size:11px">distance from the belief&#39;s claim</span>`);
+    // The honest framing. #13766 is 573rd of 7,239 against this claim: retrieval was
+    // never going to surface it, which is precisely why a human had to put it forward.
+    h += `<p class="sub" style="margin-top:10px"><span class="mono">Not retrieved — introduced by URL.</span></p>`;
+  }
+
+  h += '<h2>State</h2>';
+  h += row('<span class="mono">belief · ancestor</span>',
+           `<span class="mono">${esc(S.ancestor_status)}</span>`);
+  h += row(`<span class="l dim trunc" style="font-size:11px">${esc(S.ancestor_claim)}</span>`, '');
+  h += row('<span class="mono">belief · descendant</span>', `<span class="mono">${esc(S.status)}</span>`);
+  h += row('<span class="mono">action_intent</span>',
+           `<span class="mono">${esc(S.intent || 'none')} · ${esc(S.intent_state || '—')}</span>`);
+  h += row('<span class="mono">live_on_nonpromoted</span>', `<span class="mono">${S.live_on_nonpromoted}</span>`);
+
+  h += citationsBlock();
+  h += verdictHTML();
+
+  if (!terminal) {
+    h += `<div class="actions">
+        <button id="retract-unsafe">Retract belief</button>
+        <button id="retract-safe">Cancel intent, then retract</button>
+      </div>`;
+  }
+
+  h += chronologyBlock();
+
+  if (terminal) {
+    // Correction 1: own the imperfect judgment rather than hide it. Solvent does not
+    // decide whether the operator's reasoning was good; it makes the reasoning explicit,
+    // attributable, and structurally bounded. Explanatory copy only -- nothing here is
+    // read from or asserted against the database.
+    const cited = (S.citations || []).find(c => c.relation === 'considered');
+    const citedTxt = cited ? `#${cited.issue_number} at ${Number(cited.distance).toFixed(3)}` : 'a retrieved issue';
+    h += `<h2>What just happened</h2>
+      <p class="sub"><span class="mono">needContradictionSweep</span> was discharged by citing
+      ${esc(citedTxt)}. The sweep was performed. The judgment was wrong. Solvent recorded both,
+      and refused to let the intent outlive the belief.</p>`;
+  }
+
+  h += `<footer style="margin-top:32px"><a href="/proof">Isolation experiment ↗</a></footer>`;
+  return h;
+}
+
+function chronologyBlock() {
+  if (!S.refusals.length) return '';
+  let h = '<h2>Refused, on the record</h2>';
+  for (const r of S.refusals) {
+    h += row(`<span class="mono">${esc(r.statement)}</span>`,
+             `<span class="mono">${esc(r.sqlstate)}${r.constraint ? ' · ' + esc(r.constraint) : ''}</span>`);
+    h += `<div class="row"><span class="l dim" style="font-size:11px">${esc(r.logged_at)}</span><span class="r"></span></div>`;
+  }
+  return h;
+}
+
+function render() {
+  stepper();
+  app.innerHTML = S.screen === 'ASK' ? screenAsk()
+                : S.screen === 'DISCHARGE' ? screenDischarge()
+                : screenFalsify();
+  wire();
+}
+
+function wire() {
+  const q = document.getElementById('q');
+  const on = (id, fn) => { const e = document.getElementById(id); if (e) e.onclick = fn; };
+
+  on('search', async () => {
+    notice = ''; verdict = null;
+    lastQuery = q ? q.value : lastQuery;
+    try {
+      const r = await api('/api/search', {query: lastQuery});
+      hits = r.hits || [];
+      if (!hits.length) notice = 'No results for that query.';
+    } catch (e) { hits = []; notice = e.message; }
+    await refresh();
+  });
+
+  document.querySelectorAll('[data-pick]').forEach(cb => {
+    cb.onchange = async () => {
+      const id = cb.dataset.pick;
+      const hit = hits.find(h => h.corpus_id === id) || {};
+      try {
+        await api('/api/select', {corpus_id:id, query:lastQuery, distance:hit.distance||0, on:cb.checked});
+        hit.selected = cb.checked;
+      } catch (e) { notice = e.message; cb.checked = !cb.checked; }
+      await refresh();
+    };
+  });
+
+  document.querySelectorAll('[data-dis]').forEach(b => {
+    b.onclick = async () => {
+      const item = b.dataset.dis;
+      const box = document.querySelector(`[data-art="${item}"]`);
+      verdict = await api('/api/discharge', {check:item, artifact: box ? box.value : ''});
+      await refresh();
+    };
+  });
+
+  // Both always enabled. Clicking with debt outstanding is the point.
+  on('promote',   async () => { verdict = await api('/api/promote',   {}); await refresh(); });
+  on('authorize', async () => { verdict = await api('/api/authorize', {}); await refresh(); });
+
+  const issue = document.getElementById('issue');
+  on('introduce', async () => {
+    notice = ''; verdict = null;
+    lastIssue = issue ? issue.value : lastIssue;
+    try {
+      intro = await api('/api/introduce', {issue_url: lastIssue});
+    } catch (e) { intro = null; notice = e.message; }
+    await refresh();
+  });
+
+  // Order matters and is the whole point: the naive button first, refused; then the
+  // kernel's own path, which commits.
+  on('retract-unsafe', async () => { verdict = await api('/api/retract', {mode:'unsafe'}); await refresh(); });
+  on('retract-safe',   async () => { verdict = await api('/api/retract', {mode:'safe'});   await refresh(); });
+}
+
+document.getElementById('reset').onclick = async () => {
+  verdict = null; hits = []; notice = ''; lastQuery = DEFAULT_Q; intro = null; lastIssue = '';
+  await api('/api/reset', {});
+  await refresh();
+};
+
+refresh().catch(e => { app.innerHTML = `<p class="err">${esc(e.message)}</p>`; });
+</script>
+<footer>Solvent · the database decides what may be believed and acted on.</footer>
+</body>
+</html>

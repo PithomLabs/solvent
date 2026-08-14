@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solvent — isolation experiment</title>
+<style>
+:root{
+  --ink:#14140F; --muted:#6E6C64; --faint:#9A9891;
+  --paper:#FBFAF7; --surface:#FFFFFF; --rule:#DDDBD3;
+  --refuse:#A32D2D; --refuse-bg:#FCEBEB;
+  --commit:#3B6D11; --commit-bg:#EAF3DE;
+  --font-sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 15px/1.55 var(--font-sans)}
+header{display:flex;align-items:baseline;gap:16px;padding:16px 24px;border-bottom:1px solid var(--rule)}
+header .brand{font-size:13px;letter-spacing:.18em;text-transform:uppercase;font-weight:500}
+header a{color:var(--muted);font-size:11px;text-decoration:none;margin-left:auto}
+header a:hover{color:var(--ink)}
+main{max-width:860px;margin:0 auto;padding:32px 24px 72px}
+h1{font-size:22px;font-weight:500;margin:24px 0 6px}
+h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);font-weight:500;margin:36px 0 10px}
+p{margin:0 0 14px}
+p.sub{color:var(--muted);font-size:13px}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:0 0 8px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);font-weight:500}
+td.mono,th.mono,.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.refuse{color:var(--refuse)}
+.commit{color:var(--commit)}
+blockquote{margin:0 0 18px;padding:12px 14px;background:var(--surface);border-left:3px solid var(--rule);
+  color:var(--ink);font-size:14px}
+pre{background:var(--surface);border:1px solid var(--rule);padding:14px;overflow-x:auto;
+  font-family:var(--font-mono);font-size:12px;line-height:1.5;margin:0 0 24px}
+details{margin:0 0 20px}
+summary{cursor:pointer;font-size:12px;color:var(--muted)}
+summary:hover{color:var(--ink)}
+footer{margin-top:40px;padding-top:12px;border-top:1px solid var(--rule);color:var(--faint);font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">Solvent</span>
+  <span class="sub">Isolation experiment</span>
+  <a href="/demo">← back to the demo</a>
+</header>
+<main>
+
+<h1>Correct application logic is not enough</h1>
+<p class="sub">The same race, run three ways. Only the schema changes.</p>
+
+<table>
+  <tr><th>Cell</th><th>Schema</th><th>Isolation</th><th>Observed</th></tr>
+  <tr>
+    <td class="mono">1</td><td>naive</td><td class="mono">READ COMMITTED</td>
+    <td class="refuse">no error, both transactions commit, <span class="mono">AUDIT = 1</span></td>
+  </tr>
+  <tr>
+    <td class="mono">2</td><td>naive</td><td class="mono">SERIALIZABLE</td>
+    <td class="mono">40001 RETRY_SERIALIZABLE</td>
+  </tr>
+  <tr>
+    <td class="mono">3</td><td>hardened</td><td class="mono">READ COMMITTED</td>
+    <td class="commit mono">23503 · gate</td>
+  </tr>
+</table>
+<p class="sub">Cells 1 and 2 ran on local CockroachDB v26.2.0. <strong>Cell 3 ran on
+<span class="mono">great-goat</span>, CockroachDB v26.2.5.</strong> Audit is
+<span class="mono">0</span> in cells 2 and 3.</p>
+
+<h2>Cell 1 — what the naive schema permits</h2>
+<blockquote>
+Both transactions ran correct application logic. The result was a live intent authorising
+action on a retracted belief, committed silently, with no error anywhere. The corruption
+came from the schema, not from a logic bug.
+</blockquote>
+<p class="sub">The writer read the belief's status and saw <span class="mono">promoted</span>.
+The cascade cancelled live intents before retracting. Neither did anything wrong. This was
+left open until it was observed — the anomaly was inherited from a PostgreSQL-era claim and
+had never been run against CockroachDB.</p>
+
+<h2>Cell 2 — how to read <span class="mono">40001</span></h2>
+<p><span class="mono">40001</span> is a <strong>retry signal, not a refusal.</strong> Under
+<span class="mono">crdb.ExecuteTx</span> the transaction retries and may then succeed. The
+accurate chain is:</p>
+<blockquote class="mono">detect → retry → refusal on fresh state</blockquote>
+<p class="sub">Serializable detects the write-write conflict and forces a retry; the retry
+re-reads the belief's status, and <em>then</em> the constraint refuses. This harness
+deliberately does not retry, so the raw <span class="mono">40001</span> is visible. Never
+narrate it as "<span class="mono">40001</span> → transaction refused".</p>
+
+<h2>Cell 3 — the scope of the claim, exactly as measured</h2>
+<p>Cell 3 ran on the real cluster, at the real version, against the real DDL — generated
+by <span class="mono">db/001_schema.sql</span> itself and diffed to prove it identical —
+but on <strong>different rows in a disposable schema</strong>. What it establishes is a
+property of the schema and the engine, <em>not</em> of the rows. The four frozen ledger
+tables were never written to.</p>
+
+<h2>Transcripts</h2>
+<details>
+  <summary>proof/isolation.log — the three-cell experiment</summary>
+  <pre>{{.Isolation}}</pre>
+</details>
+<details>
+  <summary>proof/act6_tier_probe.log — which Act 6 climax is available</summary>
+  <pre>{{.Act6Tier}}</pre>
+</details>
+
+<footer>Embedded at build time. This page cannot show a transcript that is not committed to the repository.</footer>
+</main>
+</body>
+</html>

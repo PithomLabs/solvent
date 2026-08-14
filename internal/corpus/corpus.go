@@ -216,6 +216,17 @@ const sqlSearch = `
 	ORDER BY embedding <=> $2::VECTOR
 	LIMIT $3`
 
+// SearchSQL returns the exact statement Search executes.
+//
+// Exposed so a caller can EXPLAIN the real query rather than a reconstruction of
+// it. That distinction is not pedantic: a hand-written lookalike is precisely what
+// let a regression through once before, staying green in a test while the
+// production statement silently stopped using the vector index. Anything asserting
+// index use should assert against this.
+//
+// Placeholders are $1 scenario_id, $2 query vector literal, $3 limit.
+func SearchSQL() string { return sqlSearch }
+
 // Search returns the k nearest corpus rows to query within one scenario.
 //
 // Results are candidates, not conclusions. The distance travels with each hit so
@@ -253,26 +264,63 @@ func Search(ctx context.Context, db *sql.DB, scenarioID string, query []float32,
 	return out, rows.Err()
 }
 
+// Citation relations, matching the CHECK added by db/003_wizard.sql.
+//
+// The distinction is the whole reason the column exists: "I looked at this while
+// deciding" and "this contradicts what I decided" are different acts, and a citation
+// that cannot tell them apart cannot support either screen of the demo.
+const (
+	// RelationConsidered marks a row a reviewer had in front of them while discharging
+	// debt. It is the column default, so existing citations keep this meaning.
+	RelationConsidered = "considered"
+
+	// RelationContradicts marks a row introduced as evidence against a belief.
+	RelationContradicts = "contradicts"
+)
+
 const sqlCite = `
-	INSERT INTO belief_corpus_citation (belief_id, corpus_id, distance, query_text)
-	VALUES ($1::UUID, $2::UUID, $3::FLOAT8, $4::STRING)
+	INSERT INTO belief_corpus_citation (belief_id, corpus_id, distance, query_text, relation)
+	VALUES ($1::UUID, $2::UUID, $3::FLOAT8, $4::STRING, $5::STRING)
 	ON CONFLICT (belief_id, corpus_id) DO UPDATE
 	  SET distance = excluded.distance,
 	      query_text = excluded.query_text,
+	      relation = excluded.relation,
 	      retrieved_at = now()`
 
+const sqlUncite = `
+	DELETE FROM belief_corpus_citation
+	 WHERE belief_id = $1::UUID AND corpus_id = $2::UUID`
+
 // Cite records that a belief was formed citing a corpus row, at a measured
-// distance, in answer to a specific question.
+// distance, in answer to a specific question, and in a stated relation to the claim.
 //
 // This is the auditable half of retrieval. Without it, "the agent consulted
 // relevant history" is an assertion nobody can check; with it, the distance and
 // the query are on the record and a reviewer can re-run the search and compare.
 //
 // belief_id is a real foreign key to belief(id), so a citation cannot name a
-// belief that does not exist.
-func Cite(ctx context.Context, db *sql.DB, beliefID, corpusID string, distance float64, queryText string) error {
-	if _, err := db.ExecContext(ctx, sqlCite, beliefID, corpusID, distance, queryText); err != nil {
-		return fmt.Errorf("cite %s -> %s: %w", beliefID, corpusID, err)
+// belief that does not exist. relation is checked by the database, not here.
+//
+// Idempotent by primary key: citing the same pair twice refreshes the distance,
+// query and relation rather than duplicating the row. That is what lets a judge
+// toggle a selection, and re-run a search, without accumulating history nobody asked
+// for.
+func Cite(ctx context.Context, db *sql.DB, beliefID, corpusID string, distance float64, queryText, relation string) error {
+	if _, err := db.ExecContext(ctx, sqlCite, beliefID, corpusID, distance, queryText, relation); err != nil {
+		return fmt.Errorf("cite %s -> %s (%s): %w", beliefID, corpusID, relation, err)
+	}
+	return nil
+}
+
+// Uncite removes a citation. Deleting a row nobody cited is success, not an error —
+// the caller is asserting an end state, not describing a transition.
+//
+// This exists because selection in the ASK screen is a toggle. Without it the only
+// way to un-select would be to leave a stale citation on the record, which is the
+// opposite of what the citation table is for.
+func Uncite(ctx context.Context, db *sql.DB, beliefID, corpusID string) error {
+	if _, err := db.ExecContext(ctx, sqlUncite, beliefID, corpusID); err != nil {
+		return fmt.Errorf("uncite %s -> %s: %w", beliefID, corpusID, err)
 	}
 	return nil
 }

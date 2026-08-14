@@ -13,10 +13,24 @@ import (
 // These six items are byte-identical, and in the same order, to the ARRAY[...]
 // default on belief.debt in db/001_schema.sql. The duplication is deliberate — the
 // Go constant is what EnterBelief writes — but it means the two can drift, so any
-// change to one must change the other.
+// change to one must change the other. Tests B-17 and B-23 exist to catch that drift
+// behaviourally: they insert a belief and compare what the database actually stored
+// against this slice.
+//
+// # The vocabulary changed in Phase 5, on purpose
+//
+// These names were inherited physics-proof scaffolding (needMap, needInvariant,
+// needToyCheck, needNullModel, needObstruction, needFaithfulnessReview). They are now
+// the deployment-review obligations the demo is actually about. Same count, same
+// order, same mechanism — only the strings moved, so every invariant and every
+// cardinality check is unaffected.
+//
+// Existing rows were deliberately NOT rewritten. A belief that entered the ledger
+// under the old vocabulary keeps the debt it was issued; the change applies to what
+// the database hands out from here on. See db/004_debt_vocabulary.sql.
 var FullDebt = []string{
-	"needMap", "needInvariant", "needToyCheck",
-	"needNullModel", "needObstruction", "needFaithfulnessReview",
+	"needProvenanceCheck", "needContradictionSweep", "needBlastRadius",
+	"needRollbackPlan", "needVersionPin", "needOperatorSignoff",
 }
 
 // ClaimType is the typed provenance of a claim. The three values are exactly the

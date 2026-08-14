@@ -16,7 +16,7 @@ import (
 
 // 002 carries the corpus layer. Applied everywhere so every environment has one
 // schema shape; these packages do not use the corpus tables themselves.
-var schemaPaths = []string{"../../db/001_schema.sql", "../../db/002_corpus.sql"}
+var schemaPaths = []string{"../../db/001_schema.sql", "../../db/002_corpus.sql", "../../db/003_wizard.sql", "../../db/004_debt_vocabulary.sql"}
 
 var (
 	dsn    string

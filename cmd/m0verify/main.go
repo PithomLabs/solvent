@@ -155,11 +155,26 @@ func fail(msg string) {
 }
 
 // schemaFiles returns the frozen DDL and, when it exists beside it, the corpus layer.
+// schemaFiles is the frozen DDL plus every layer stacked on it, in order.
+//
+// Each layer is applied beside the frozen DDL when present so probe B3's expected
+// table set matches what is actually created. Ordering matters: 002 references
+// belief(id), and 003 alters a table 002 creates.
+//
+// A layer added to db/ but not listed here fails B3 in the confusing direction — the
+// expected set grows while the observed set does not, which reads as a missing table
+// rather than a missing migration step.
 func schemaFiles(schema string) []string {
 	paths := []string{schema}
-	corpus := filepath.Join(filepath.Dir(schema), "002_corpus.sql")
-	if _, err := os.Stat(corpus); err == nil {
-		paths = append(paths, corpus)
+	for _, layer := range []string{"002_corpus.sql", "003_wizard.sql", "004_debt_vocabulary.sql"} {
+		if p := filepath.Join(filepath.Dir(schema), layer); fileExists(p) {
+			paths = append(paths, p)
+		}
 	}
 	return paths
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
