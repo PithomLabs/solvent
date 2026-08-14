@@ -58,11 +58,13 @@ func TestW32_WizardDoesNotDisturbLedgerCounts(t *testing.T) {
 	c.do(http.MethodPost, wizard.Prefix+"/api/promote", "{}")
 	c.do(http.MethodPost, wizard.Prefix+"/api/authorize", "{}")
 	_, sr := c.do(http.MethodPost, wizard.Prefix+"/api/search", `{"query":"ledger isolation"}`)
-	if hits, _ := sr["hits"].([]any); len(hits) > 0 {
-		h0 := hits[0].(map[string]any)
+	// Two selections: each retrieval check consumes its own citation.
+	hits, _ := sr["hits"].([]any)
+	for i := 0; i < 2 && i < len(hits); i++ {
+		h := hits[i].(map[string]any)
 		c.do(http.MethodPost, wizard.Prefix+"/api/select",
-			`{"corpus_id":"`+h0["corpus_id"].(string)+`","query":"ledger isolation","distance":`+
-				jsonNum(h0["distance"])+`,"on":true}`)
+			`{"corpus_id":"`+h["corpus_id"].(string)+`","query":"ledger isolation","distance":`+
+				jsonNum(h["distance"])+`,"on":true}`)
 	}
 	for _, item := range kernel.FullDebt {
 		c.do(http.MethodPost, wizard.Prefix+"/api/discharge",
