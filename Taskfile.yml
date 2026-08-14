@@ -204,6 +204,23 @@ tasks:
       - 'echo "wizard  http://localhost:${PORT:-8080}/demo"'
       - go run ./demo/cloud/web
 
+  deploy:
+    desc: >-
+      Deploy to AWS App Runner. Six steps, fail-closed: ccloud preflight, build+push,
+      update-service, re-assert InstanceRoleArn+FABLE_DSN, wait RUNNING, cloud smoke.
+    cmds:
+      - scripts/deploy.sh
+
+  preflight:
+    desc: Verify the target CockroachDB cluster via ccloud structured output (fail-closed)
+    cmds:
+      - scripts/ccloud_preflight.sh
+
+  mcp:verify:
+    desc: Speak JSON-RPC to solvent-mcp over stdio and assert its six tools and guards
+    cmds:
+      - scripts/mcp_verify.sh
+
   test:
     desc: Run the full verification suite
     cmds:
@@ -247,3 +264,11 @@ tasks:
           exit 1
         fi
         echo "I-7 MCP boundary: PASS"
+      # The MCP server's own protocol surface, spoken to over stdio.
+      #
+      # The static greps above prove the MCP layer cannot write; they say nothing about
+      # whether it still exposes six working tools. Nothing did, until this script: the
+      # "six tools" claim in README.md was a claim about a binary no test had ever
+      # spoken JSON-RPC to. It also pins the debt_item guard, which the SDK's schema
+      # cannot enforce for us.
+      - scripts/mcp_verify.sh

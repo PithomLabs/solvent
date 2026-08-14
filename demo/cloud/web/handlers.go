@@ -285,6 +285,16 @@ func handleAudit(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 
+	// The filter is on a.scenario_id only, not b.scenario_id.
+	//
+	// Correct today because action_intent.belief_id always points into the same
+	// scenario, so the join cannot reach another one. Worth knowing rather than
+	// discovering: if that ever stops holding, this count silently starts including
+	// other scenarios' beliefs -- and it is the one number on the site that is supposed
+	// to be provably zero. Every other ledger query filters the tables it reads
+	// directly; this is the only one relying on a join staying within a scenario.
+	// W-32 (internal/wizard/ledger_isolation_test.go) pins the counts against wizard
+	// traffic, which is the traffic that would expose it.
 	var count int
 	err := db.QueryRowContext(ctx,
 		`SELECT count(*) FROM action_intent a
