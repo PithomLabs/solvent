@@ -42,13 +42,21 @@ Solvent is a **database-enforced memory system** where autonomous agents cannot 
 
 ## Challenges Overcome
 
-### 1. Vector Not Implemented
+### 1. Vector Not Implemented — SUPERSEDED
 
-**Problem:** The original plan assumed Vector (pgvector) was implemented as a CockroachDB tool. Investigation revealed it was not — no vector files, no embedding columns, no vector queries exist in the codebase.
+> **This entry is historical and its conclusion no longer holds.** It recorded that, at the
+> time of the cloud packaging, no vector column or query existed in the codebase. Phases 3 and
+> 4 implemented it for real: `db/002_corpus.sql` adds `corpus_issue.embedding VECTOR(1024)`
+> with `corpus_issue_embedding_idx (scenario_id, embedding vector_cosine_ops)`, and all 7,239
+> corpus rows carry genuine Amazon Titan v2 embeddings on both the local and hosted clusters.
+> Live cosine ANN retrieval runs on every `/demo` search.
+>
+> The tool claims that followed from it are superseded too. See the claimed-tools table in the
+> root `README.md`, which is authoritative.
 
-**Solution:** Pivoted to a two-tool path:
-- Tool #1: CockroachDB Managed MCP (investigated, endpoint confirmed)
-- Tool #2: ccloud CLI (real interaction, JSON receipt)
+**Problem (as recorded then):** The original plan assumed Vector was implemented as a CockroachDB tool. Investigation revealed it was not — no vector files, no embedding columns, no vector queries existed in the codebase at that point.
+
+**Solution (as recorded then):** Pivoted to a two-tool path — Managed MCP plus ccloud CLI.
 
 ### 2. Managed MCP Requires Service Account API Key
 
@@ -88,18 +96,36 @@ Solvent is a **database-enforced memory system** where autonomous agents cannot 
 
 ## CockroachDB Tools Demonstrated
 
-### Tool #1 — Managed MCP
+**Authoritative list: the claimed-tools table in the root `README.md`.** This section is kept
+because it records how the claim evolved, but the numbering below predates the vector work and
+must not be read as the submission's claim.
+
+### Tool 1 — Distributed Vector Indexing ✅ verified
+
+- **Column / index:** `corpus_issue.embedding VECTOR(1024)`,
+  `corpus_issue_embedding_idx (scenario_id, embedding vector_cosine_ops)`
+- **Coverage:** 7,239 / 7,239 rows embedded with `amazon.titan-embed-text-v2:0`
+- **Use:** live cosine ANN retrieval (`<=>`) on every deployed `/demo` search
+- **Status:** verified on `great-goat`; deployed distances are byte-identical to local
+
+### Tool 2 — ccloud CLI ✅ verified
+
+- **Auth:** Pithom Labs (`org-32ndt`)
+- **Clusters visible:** great-goat (AWS, us-west-2 primary), silver-fish (GCP, asia-southeast1)
+- **Interactive use:** cluster introspection through Claude Code — identity, region, version
+- **Programmatic use:** `scripts/ccloud_preflight.sh` parses `ccloud cluster list --output json`
+  and **fails the deploy closed** on any mismatch of cluster id, name, cloud, version, state or
+  primary region. Selected by id, because the org holds two clusters.
+- **Status:** PASS — wired into `task deploy` step 1
+
+### Additionally configured — Cloud Managed MCP Server ⏳ not claimed
 
 - **Endpoint:** `https://cockroachlabs.cloud/mcp`
-- **Cluster:** `*****`
-- **Transport:** HTTP (HTTPS)
-- **Status:** Investigated, confirmed
-
-### Tool #2 — ccloud CLI
-
-- **Auth:** Gani Mendoza (Pithom Labs)
-- **Clusters:** great-goat (AWS), silver-fish (GCP)
-- **Status:** PASS with JSON receipt
+- **Cluster:** `great-goat` · `c995cb24-e07b-4470-bfb3-344c44ce0de1`
+- **Transport:** HTTP (HTTPS), bearer service-account key
+- **Status:** endpoint and cluster documented; end-to-end verification pending an owner-issued
+  key. `scripts/cloud_mcp_verify.sh` closes it. **A configured endpoint is not a verified
+  tool**, so it is deliberately excluded from the claim above until that script passes.
 
 ## Serverless Invariant Lifecycle
 
