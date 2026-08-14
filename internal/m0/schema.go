@@ -30,6 +30,7 @@ var expectedTables = []string{
 	"belief_edge",
 	"corpus_issue", // corpus layer
 	"evidence",
+	"refusal_log", // wizard layer, db/003_wizard.sql -- approved Phase 5 addition
 }
 
 // ApplyDDL runs db/001_schema.sql statement by statement. The DDL is frozen; this
@@ -158,7 +159,7 @@ func RecordTableCount(ctx context.Context, r *Runner) {
 
 	p := Probe{
 		ID:        "B3",
-		Criterion: "Exactly the contracted tables exist: the four frozen ledger tables plus the two corpus tables (contract §2 as amended, D-P2-3)",
+		Criterion: "Exactly the contracted tables exist: the four frozen ledger tables, the two corpus tables, and the wizard refusal log (contract §2 as amended, D-P2-3 and Phase 5)",
 		Statement: "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name",
 		Expected:  strings.Join(expectedTables, ", "),
 		Observed:  strings.Join(names, ", "),

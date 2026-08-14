@@ -55,8 +55,8 @@ echo "--- Operator review: retire debts, promote, create intent ---"
 go run "$REPO_ROOT/cmd/operator-review" --dsn "$FABLE_DSN" \
   --scenario "$SOLVENT_SCENARIO_1" --belief "$ADVISORY_ID" \
   --action "deploy etcd v3.5.28" \
-  --debt needInvariant --debt needToyCheck --debt needNullModel \
-  --debt needObstruction --debt needFaithfulnessReview 2>&1
+  --debt needContradictionSweep --debt needBlastRadius --debt needRollbackPlan \
+  --debt needVersionPin --debt needOperatorSignoff 2>&1
 echo
 
 # --- Final summary ---

@@ -11,8 +11,8 @@
 // 2. Review an existing belief (debt retirement, promotion, intent):
 //
 //	operator-review --dsn "$FABLE_DSN" --scenario <uuid> --belief <uuid> \
-//	  --debt needInvariant --debt needToyCheck --debt needNullModel \
-//	  --debt needObstruction --debt needFaithfulnessReview \
+//	  --debt needContradictionSweep --debt needBlastRadius --debt needRollbackPlan \
+//	  --debt needVersionPin --debt needOperatorSignoff \
 //	  --action "deploy etcd v3.5.28"
 package main
 

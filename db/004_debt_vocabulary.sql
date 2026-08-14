@@ -1,0 +1,47 @@
+-- Debt vocabulary: the deployment-review obligations replace the inherited
+-- physics-proof scaffolding.
+--
+-- AMENDED FROZEN DEFAULT. Authorised by demo2/phase5_imp_review.md section 1, and
+-- recorded as an amendment rather than drift. demo2/PHASE0_REPORT.md previously
+-- declared kernel.FullDebt-byte-identical-to-DDL a frozen path; that declaration is
+-- amended here, not violated -- the two encodings still have to agree, and tests B-17
+-- and B-23 still prove they do.
+--
+--   OLD                       NEW
+--   needMap                   needProvenanceCheck
+--   needInvariant             needContradictionSweep
+--   needToyCheck              needBlastRadius
+--   needNullModel             needRollbackPlan
+--   needObstruction           needVersionPin
+--   needFaithfulnessReview    needOperatorSignoff
+--
+-- Same count, same order, same mechanism. promoted_is_debt_free checks cardinality
+-- (array_length = 0), never element values, so no invariant changes and no constraint
+-- needs rebuilding. debt is an unconstrained TEXT[] -- there is no enum to migrate.
+--
+-- # Why this file exists when 001_schema.sql was also edited
+--
+-- Both are required, and the reason is easy to miss. db/001_schema.sql holds the only
+-- copy of the ARRAY[...] default, so a FRESH database takes its default from there.
+-- But an existing database never re-applies 001 -- demo/cloud/init applies only the
+-- layers above it on a warm start -- so without this file the deployed cluster would
+-- keep handing out the old six while kernel.FullDebt expected the new six. Beliefs
+-- created there would silently carry debt the application cannot discharge.
+--
+-- 001 covers new databases. This covers the ones that already exist.
+--
+-- # Existing rows are deliberately not rewritten
+--
+-- SET DEFAULT cannot touch stored rows, which is the cleanest available guarantee that
+-- history is preserved. A belief that entered the ledger under the old vocabulary keeps
+-- the debt it was issued. That is correct: debt is a record of what was outstanding at
+-- the time, not a live configuration to be restated. Nothing in the demo re-reads an
+-- old row's debt names, and the wizard only ever works with beliefs it created itself.
+--
+-- APPLIER CONSTRAINT: internal/testdb and internal/m0 split .sql files on `;` after
+-- stripping `--` line comments. Plain DDL only: no dollar-quoting, no /* */, and no
+-- `--` or `;` inside a string literal.
+--
+-- Idempotent. The cloud initializer applies this on every container start.
+
+ALTER TABLE belief ALTER COLUMN debt SET DEFAULT ARRAY['needProvenanceCheck', 'needContradictionSweep', 'needBlastRadius', 'needRollbackPlan', 'needVersionPin', 'needOperatorSignoff'];

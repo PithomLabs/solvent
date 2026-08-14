@@ -26,6 +26,8 @@ tasks:
       - docker exec solvent-crdb cockroach sql --insecure -e "DROP DATABASE IF EXISTS fable CASCADE; CREATE DATABASE fable;"
       - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/001_schema.sql
       - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/002_corpus.sql
+      - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/003_wizard.sql
+      - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/004_debt_vocabulary.sql
       - echo "Database reset complete."
 
   demo:track1:
@@ -100,8 +102,8 @@ tasks:
         go run ./cmd/operator-review --dsn "$SOLVENT_DSN" \
           --scenario "$SOLVENT_SCENARIO_1" --belief "$BELIEF_ID" \
           --action "deploy etcd v3.5.0" \
-          --debt needMap --debt needInvariant --debt needToyCheck \
-          --debt needNullModel --debt needObstruction --debt needFaithfulnessReview
+          --debt needProvenanceCheck --debt needContradictionSweep --debt needBlastRadius \
+          --debt needRollbackPlan --debt needVersionPin --debt needOperatorSignoff
       - 'echo "Promoted seed complete - track1 has 1 promoted debt-free belief with 1 live intent, audit 0."'
 
   agent:workspace:
@@ -157,6 +159,51 @@ tasks:
     cmds:
       - go run ./cmd/corpus-ingest --dsn "$SOLVENT_DSN" --verify
 
+  corpus:embed:sample:
+    desc: 'Cost/safety gate: embed 20 rows and prove dimensions before spending on 7,239'
+    dotenv:
+      - scripts/demo/config.env
+    cmds:
+      - go run ./cmd/corpus-ingest --dsn "$SOLVENT_DSN" --embed --limit 20
+
+  corpus:embed:
+    desc: Generate Bedrock Titan embeddings for the corpus (resumable, idempotent)
+    dotenv:
+      - scripts/demo/config.env
+    cmds:
+      - go run ./cmd/corpus-ingest --dsn "$SOLVENT_DSN" --embed
+
+  corpus:embed:cloud:
+    desc: 'Reconcile the SAME checkpoint vectors into local and cloud (needs FABLE_DSN_2)'
+    dotenv:
+      - scripts/demo/config.env
+    cmds:
+      # No second Bedrock call: --also-dsn reconciles both targets from the one
+      # checkpoint, which is what makes "both databases hold identical vectors"
+      # provable rather than asserted.
+      - test -n "$FABLE_DSN_2" || (echo "FABLE_DSN_2 is not set; see scripts/demo/config.env" && exit 1)
+      - go run ./cmd/corpus-ingest --dsn "$SOLVENT_DSN" --also-dsn "$FABLE_DSN_2" --embed
+
+  corpus:search:
+    desc: 'ANN-search the corpus. Usage: task corpus:search -- "is etcd v3.5.x safe to deploy?"'
+    dotenv:
+      - scripts/demo/config.env
+    cmds:
+      - go run ./cmd/corpus-ingest --dsn "$SOLVENT_DSN" --search "{{.CLI_ARGS}}" --explain
+
+  web:run:
+    desc: 'Run the judge-facing web app locally (ledger at /, wizard at /demo)'
+    dotenv:
+      - scripts/demo/config.env
+    env:
+      FABLE_DSN: '{{.SOLVENT_DSN}}'
+    cmds:
+      # The web app and the initializer both read FABLE_DSN, not SOLVENT_DSN, and both
+      # resolve paths relative to the repo root.
+      - 'echo "ledger  http://localhost:${PORT:-8080}/"'
+      - 'echo "wizard  http://localhost:${PORT:-8080}/demo"'
+      - go run ./demo/cloud/web
+
   test:
     desc: Run the full verification suite
     cmds:
@@ -165,6 +212,25 @@ tasks:
       - go vet ./...
       - test -z "$(gofmt -l cmd internal kernel)" || (echo "gofmt check failed" && exit 1)
       - scripts/check_i7.sh
+      # One judge-facing promote path, one authorize path.
+      #
+      # "The same SQL on both screens" holds because there is a single call site for
+      # each, in internal/wizard/refusal.go, reached by both screens with no screen
+      # parameter. A second call site is exactly how a screen-dependent branch or a
+      # handler-side debt precondition gets in, and either would end the demo's
+      # argument.
+      #
+      # internal/wizard/seed.go is the one permitted exception: it promotes the seeded
+      # ANCESTOR as setup, which is not a screen action and is never reached by a
+      # request. Nothing else in the package may call either method.
+      - |
+        for fn in "s.kern.Promote(" "s.kern.IntentOnPromoted("; do
+          n=$(grep -cF "$fn" internal/wizard/refusal.go)
+          [ "$n" -eq 1 ] || { echo "FAIL: refusal.go has $n call sites for $fn, want exactly 1"; exit 1; }
+          stray=$(grep -rlF --include='*.go' --exclude='*_test.go' "$fn" internal/wizard                   | grep -vE 'refusal\.go|seed\.go' || true)
+          [ -z "$stray" ] || { echo "FAIL: $fn also called in: $stray"; exit 1; }
+        done
+        echo "wizard single-call-site: PASS"
       # I-7 MCP boundary — no direct writes in cmd/solvent-mcp or internal/view
       - |
         for d in cmd/solvent-mcp internal/view; do

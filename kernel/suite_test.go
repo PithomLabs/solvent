@@ -24,7 +24,7 @@ const (
 // 002 carries the corpus layer. The kernel suite does not use the corpus tables,
 // but applying both files everywhere keeps one schema shape across every
 // environment rather than letting it vary by entry point.
-var schemaPaths = []string{"../db/001_schema.sql", "../db/002_corpus.sql"}
+var schemaPaths = []string{"../db/001_schema.sql", "../db/002_corpus.sql", "../db/003_wizard.sql", "../db/004_debt_vocabulary.sql"}
 
 var (
 	dsn    string

@@ -4,6 +4,11 @@ Hosted, read-only, judge-facing version of the Solvent transactional belief ledg
 
 **Live:** https://byb43s8nh2.us-west-2.awsapprunner.com
 
+**Region:** the `great-goat` cluster's `fable` database has primary region **`aws-us-west-2`**
+(secondaries `aws-us-east-1`, `aws-us-east-2`), matching App Runner's **`us-west-2`** — so no request
+in the demo path pays a cross-region round trip. Measured with `SHOW REGIONS FROM DATABASE`; the
+transcript is in `proof/act6_tier_probe.log`.
+
 ## Architecture
 
 ```

@@ -17,8 +17,11 @@ echo
 
 # --- Reset database ---
 echo "--- Resetting database ---"
+# --file-demo-edge files the one derivation edge (internal/demoseed) once the
+# fixtures have created the two claims it connects. The cloud initializer calls the
+# same function, so local and cloud canonical state match.
 go run "$REPO_ROOT/cmd/solvent" --dsn "$FABLE_DSN" \
-  --scenario "$SOLVENT_SCENARIO_2" --reset \
+  --scenario "$SOLVENT_SCENARIO_2" --reset --file-demo-edge \
   --fixtures "$REPO_ROOT/internal/derive/testdata/etcd_real/track2" \
   2>&1 | grep -v '^$'
 echo
@@ -42,8 +45,8 @@ echo "--- Step 2: Operator review — retire debts, promote, create intent ---"
 go run "$REPO_ROOT/cmd/operator-review" --dsn "$FABLE_DSN" \
   --scenario "$SOLVENT_SCENARIO_2" --belief "$BELIEF_ID" \
   --action "deploy etcd v3.5.0" \
-  --debt needMap --debt needInvariant --debt needToyCheck \
-  --debt needNullModel --debt needObstruction --debt needFaithfulnessReview 2>&1
+  --debt needProvenanceCheck --debt needContradictionSweep --debt needBlastRadius \
+  --debt needRollbackPlan --debt needVersionPin --debt needOperatorSignoff 2>&1
 echo
 
 # --- Show state before falsification ---

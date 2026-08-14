@@ -139,8 +139,76 @@ seed → ledger → promotion refusal → authorization refusal
 
 ### Limitations
 
-- Retraction is currently **single-belief** — `belief_edge` is not populated, so there is no multi-hop cascade.
 - The MCP layer is a thin adapter. It contains no Solvent business logic — no status checks, no debt inspection, no promotion decisions.
+- `solvent-mcp` speaks stdio only. It is a local subprocess, not a hosted service.
+- Retraction cascades across `belief_edge`, but the graph is deliberately small. `belief_edge` has no
+  writer in the kernel — invariant I-7 pins the kernel at exactly seven write paths — so the demo's
+  single derivation edge is filed by `internal/demoseed` outside the kernel. `RetractCascade`
+  traverses whatever edges exist; the demo simply does not manufacture a deep graph it cannot justify
+  from the evidence.
+
+## CockroachDB Cloud Managed MCP Server
+
+This is a **different** server from `solvent-mcp` above. `solvent-mcp` is ours and exposes the
+Solvent ledger as six domain tools. The Cloud Managed MCP Server is Cockroach Labs' own hosted
+endpoint, which connects an agent directly to the cluster for read-only SQL exploration. Both are
+useful and neither substitutes for the other.
+
+**Endpoint:** `https://cockroachlabs.cloud/mcp`
+
+**Cluster:** `great-goat` · `c995cb24-e07b-4470-bfb3-344c44ce0de1` · AWS · v26.2.5 · primary region
+`aws-us-west-2`
+
+### Configuration
+
+Add it to Claude Code with read-only access. The Cloud Console's MCP page issues the config snippet
+and the credential; the shape is:
+
+```bash
+claude mcp add cockroachdb-cloud https://cockroachlabs.cloud/mcp \
+  --transport http \
+  --header "mcp-cluster-id: <cluster-id-from-the-Cloud-Console>" \
+  --header "Authorization: Bearer <service-account-api-key>"
+```
+
+Interactive OAuth 2.1 works for a human at a terminal; a service-account API key is what an
+autonomous agent needs.
+
+### ⚠️ Verification status: NOT yet verified end-to-end
+
+Stated plainly rather than claimed, because the hackathon scores the integration and not the
+paragraph:
+
+| Fact | Status |
+|---|---|
+| Endpoint exists and enforces authorization | **verified** — unauthenticated `POST` returns `401 {"error":"invalid_request","error_description":"Authorization required"}` |
+| Cluster identity and region | **verified** via `ccloud cluster list` and `SHOW REGIONS FROM DATABASE` |
+| `ccloud` CLI authenticated against the org | **verified** — `ccloud auth whoami` reports `Pithom Labs (org-32ndt)` |
+| An agent actually querying `great-goat` through this endpoint | **NOT verified** |
+
+The single remaining step is issuing a service-account API key in the Cloud Console (or completing
+the interactive OAuth flow) and running one query through it. That step creates a credential, so it
+is deliberately left to the repository owner rather than automated here.
+
+Note also that the `mcp-cluster-id` header value has not been confirmed: the Cloud Console may expect
+the cluster UUID above or the SQL-DNS prefix (`great-goat-30894`). Take it from the Console snippet
+rather than from this file.
+
+### Three questions a judge can paste into Claude Code
+
+Once configured, these exercise the managed server against the real cluster. All are read-only.
+
+1. *"List the tables in the `fable` database and show me the `CREATE TABLE` for `action_intent`."*
+   — surfaces the `gate` composite foreign key with `ON UPDATE CASCADE` and the
+   `live_requires_promoted` check constraint, which are the two things the whole demo rests on.
+
+2. *"How many rows are in `corpus_issue`, how many have a non-null `embedding`, and what vector index
+   exists on that table?"* — should report **7,239 / 7,239** and
+   `corpus_issue_embedding_idx (scenario_id, embedding vector_cosine_ops)`.
+
+3. *"Count live `action_intent` rows whose belief is not promoted, for scenario
+   `00000000-0000-0000-0000-000000000002`."* — Solvent's standing audit invariant. It must be **0**,
+   and it must stay 0 in every committed state.
 
 ## How It Works
 

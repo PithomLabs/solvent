@@ -14,7 +14,12 @@ cd "$(dirname "$0")/.."
 
 HOST="${FABLE_HOST:-localhost}"
 PORT="${FABLE_PORT:-26260}"
-DB="${FABLE_DB:-fable}"
+# fable_m0, not fable. This script runs `m0verify --reset` three times, which DROPs and
+# recreates the target database. Defaulting to `fable` meant running M0 acceptance
+# destroyed the demo ledger, the 7,239-row corpus and its embeddings -- and it did,
+# during Phase 5 verification. M0 needs a database of its own; it asserts on schema and
+# gate behaviour, never on demo content.
+DB="${FABLE_DB:-fable_m0}"
 DSN="${FABLE_DSN:-postgresql://root@${HOST}:${PORT}/${DB}?sslmode=disable}"
 
 BIN="$(mktemp -d)/m0verify"

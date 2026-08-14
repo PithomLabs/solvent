@@ -21,7 +21,7 @@ import (
 
 // 002 carries the corpus layer. Applied everywhere so every environment has one
 // schema shape; these packages do not use the corpus tables themselves.
-var schemaPaths = []string{"../../db/001_schema.sql", "../../db/002_corpus.sql"}
+var schemaPaths = []string{"../../db/001_schema.sql", "../../db/002_corpus.sql", "../../db/003_wizard.sql", "../../db/004_debt_vocabulary.sql"}
 
 var (
 	dsn    string
@@ -411,14 +411,14 @@ func TestDebtItemsForEvidence_UnionRules(t *testing.T) {
 	// Realistic fixture body from maintainer_no_regression.json:
 	// "Confirmed no regression. All existing tests pass and the fix resolves the vulnerability."
 	// Matches R2 (tested|confirmed) AND R3 (no regression).
-	// Must return the UNION: needToyCheck, needNullModel, needObstruction.
+	// Must return the UNION: needBlastRadius, needRollbackPlan, needVersionPin.
 	body := "Confirmed no regression. All existing tests pass and the fix resolves the vulnerability."
 	items := belief.DebtItemsForEvidence("maintainer_comment", body)
 
 	expected := map[string]bool{
-		"needToyCheck":    false,
-		"needNullModel":   false,
-		"needObstruction": false,
+		"needBlastRadius":  false,
+		"needRollbackPlan": false,
+		"needVersionPin":   false,
 	}
 	for _, item := range items {
 		if _, ok := expected[item]; !ok {
@@ -440,8 +440,8 @@ func TestDebtItemsForEvidence_UnionRules(t *testing.T) {
 
 func TestDebtItemsForEvidence_SingleRuleMatch(t *testing.T) {
 	items := belief.DebtItemsForEvidence("kev_entry", "etcd is vulnerable to CVE-2024-24790")
-	if len(items) != 1 || items[0] != "needMap" {
-		t.Errorf("expected [needMap], got %v", items)
+	if len(items) != 1 || items[0] != "needProvenanceCheck" {
+		t.Errorf("expected [needProvenanceCheck], got %v", items)
 	}
 }
 
