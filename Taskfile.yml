@@ -247,3 +247,11 @@ tasks:
           exit 1
         fi
         echo "I-7 MCP boundary: PASS"
+      # The MCP server's own protocol surface, spoken to over stdio.
+      #
+      # The static greps above prove the MCP layer cannot write; they say nothing about
+      # whether it still exposes six working tools. Nothing did, until this script: the
+      # "six tools" claim in README.md was a claim about a binary no test had ever
+      # spoken JSON-RPC to. It also pins the debt_item guard, which the SDK's schema
+      # cannot enforce for us.
+      - scripts/mcp_verify.sh
