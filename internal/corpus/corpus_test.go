@@ -16,7 +16,7 @@ import (
 )
 
 // 002 carries the corpus layer and references belief(id), so 001 is applied first.
-var schemaPaths = []string{"../../db/001_schema.sql", "../../db/002_corpus.sql"}
+var schemaPaths = []string{"../../db/001_schema.sql", "../../db/002_corpus.sql", "../../db/003_wizard.sql", "../../db/004_debt_vocabulary.sql"}
 
 // Scenario namespace for this package. 1111..6666 belong to the kernel, belief,
 // intent and pipeline suites; 7777 is the kernel's lifecycle example.
@@ -363,7 +363,7 @@ func TestC07_CitationConnectsCorpusToBelief(t *testing.T) {
 	}
 
 	for _, h := range hits {
-		if err := corpus.Cite(ctx, shared, beliefID, h.ID, h.Distance, plantedQuery); err != nil {
+		if err := corpus.Cite(ctx, shared, beliefID, h.ID, h.Distance, plantedQuery, corpus.RelationConsidered); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -399,7 +399,7 @@ func TestC07_CitationConnectsCorpusToBelief(t *testing.T) {
 	}
 
 	// Re-citing is idempotent, so replaying retrieval cannot duplicate provenance.
-	if err := corpus.Cite(ctx, shared, beliefID, hits[0].ID, 0.123, plantedQuery); err != nil {
+	if err := corpus.Cite(ctx, shared, beliefID, hits[0].ID, 0.123, plantedQuery, corpus.RelationConsidered); err != nil {
 		t.Fatal(err)
 	}
 	var after int
@@ -423,9 +423,160 @@ func TestC08_CitationRequiresARealBelief(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := corpus.Cite(ctx, shared, "00000000-0000-0000-0000-0000000000ff", corpusID, 0.5, "ghost")
+	err := corpus.Cite(ctx, shared, "00000000-0000-0000-0000-0000000000ff", corpusID, 0.5, "ghost", corpus.RelationConsidered)
 	if err == nil {
 		t.Fatal("a citation naming a non-existent belief was accepted")
 	}
 	t.Logf("citation FK refused a phantom belief: %v", err)
+}
+
+// --- C-09 / C-10 / C-11: Phase 3 additions -----------------------------------
+
+const scenarioD = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" // batch + NULL-embedding cases
+
+// InsertBatch is the Phase 3 ingest path. It must be idempotent on exactly the
+// same identity as Insert, or re-running an ingest would duplicate the corpus.
+func TestC09_InsertBatchIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+
+	batch := make([]corpus.Issue, 0, 50)
+	for i := 1; i <= 50; i++ {
+		batch = append(batch, corpus.Issue{
+			ScenarioID: scenarioD, IssueNumber: i,
+			Title: fmt.Sprintf("batched issue %d", i), State: "closed",
+			URL: fmt.Sprintf("https://x/%d", i), ContentSHA256: fmt.Sprintf("batch-%d", i),
+		})
+	}
+
+	n, err := corpus.InsertBatch(ctx, shared, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 50 {
+		t.Fatalf("first batch inserted %d rows, want 50", n)
+	}
+
+	again, err := corpus.InsertBatch(ctx, shared, batch)
+	if err != nil {
+		t.Fatalf("re-inserting the same batch errored instead of no-oping: %v", err)
+	}
+	if again != 0 {
+		t.Fatalf("re-inserting the same batch added %d rows, want 0", again)
+	}
+
+	var rows int
+	if err := shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM corpus_issue WHERE scenario_id = $1::UUID`, scenarioD).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 50 {
+		t.Fatalf("scenario holds %d rows after two identical batches, want 50", rows)
+	}
+}
+
+// The batch path must refuse embeddings rather than let a later phase inherit
+// the shortcut: CockroachDB documents that batching VECTOR values degrades badly.
+func TestC10_InsertBatchRefusesEmbeddings(t *testing.T) {
+	ctx := context.Background()
+	_, err := corpus.InsertBatch(ctx, shared, []corpus.Issue{{
+		ScenarioID: scenarioD, IssueNumber: 9999, Title: "with vector", State: "open",
+		URL: "https://x/9999", ContentSHA256: "vec", Embedding: corpus.HashEmbed("anything"),
+	}})
+	if err == nil {
+		t.Fatal("InsertBatch accepted a row carrying an embedding")
+	}
+	t.Logf("refused as designed: %v", err)
+}
+
+// Regression for the defect Phase 3 would otherwise have triggered in production:
+// after ingest the corpus is full of rows with NULL embeddings, and the ANN query
+// scanned the distance into a non-pointer float64 while NULLs sorted first.
+func TestC11_SearchToleratesNullEmbeddings(t *testing.T) {
+	ctx := context.Background()
+
+	// scenarioD currently holds 50 rows, all with NULL embeddings.
+	var nullRows int
+	if err := shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM corpus_issue WHERE scenario_id = $1::UUID AND embedding IS NULL`,
+		scenarioD).Scan(&nullRows); err != nil {
+		t.Fatal(err)
+	}
+	if nullRows == 0 {
+		t.Fatal("precondition failed: expected unembedded rows in this scenario")
+	}
+
+	// Searching a scenario made entirely of unembedded rows must return nothing,
+	// not error.
+	hits, err := corpus.Search(ctx, shared, scenarioD, corpus.HashEmbed("anything"), 5)
+	if err != nil {
+		t.Fatalf("search over unembedded rows errored: %v", err)
+	}
+	if len(hits) != 0 {
+		t.Fatalf("got %d hits from a scenario with no embeddings, want 0", len(hits))
+	}
+
+	// Now add one embedded row alongside the 50 unembedded ones. It must be found,
+	// and the NULL rows must not crowd it out by sorting first.
+	const target = "raft leader election timeout"
+	if _, _, err := corpus.Insert(ctx, shared, corpus.Issue{
+		ScenarioID: scenarioD, IssueNumber: 100000, Title: target, State: "closed",
+		URL: "https://x/100000", ContentSHA256: "embedded", Embedding: corpus.HashEmbed(target),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	hits, err = corpus.Search(ctx, shared, scenarioD, corpus.HashEmbed(target), 5)
+	if err != nil {
+		t.Fatalf("search with mixed NULL/embedded rows errored: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("got %d hits, want exactly the 1 embedded row", len(hits))
+	}
+	if hits[0].IssueNumber != 100000 {
+		t.Fatalf("nearest hit is %d, want 100000", hits[0].IssueNumber)
+	}
+	if hits[0].Distance != 0 {
+		t.Fatalf("exact match has distance %v, want 0", hits[0].Distance)
+	}
+}
+
+// C-12 closes the gap that let a real regression through: TestC05 EXPLAINs a
+// query typed into the test, so a change to the production statement could
+// downgrade the plan from a vector search to a full scan without failing anything.
+// This EXPLAINs the statement that actually runs.
+func TestC12_ProductionSearchStatementUsesVectorIndex(t *testing.T) {
+	ctx := context.Background()
+	lit, err := corpus.Encode(corpus.HashEmbed(plantedQuery))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := shared.QueryContext(ctx,
+		"EXPLAIN "+corpus.SQLSearchForTest, scenarioC, lit, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var plan strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		plan.WriteString(line)
+		plan.WriteString("\n")
+	}
+	p := plan.String()
+
+	if !strings.Contains(p, "vector search") {
+		t.Errorf("the production ANN statement does not use a vector search:\n%s", p)
+	}
+	if !strings.Contains(p, "corpus_issue_embedding_idx") {
+		t.Errorf("the production ANN statement does not use the vector index:\n%s", p)
+	}
+	if !strings.Contains(p, "prefix spans") {
+		t.Errorf("the production ANN statement lost its scenario prefix bound:\n%s", p)
+	}
+	t.Logf("production plan:\n%s", p)
 }

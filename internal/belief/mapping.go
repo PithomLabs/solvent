@@ -14,22 +14,22 @@ type DebtRule struct {
 // It is a compile-time constant — no configuration, no runtime mutation.
 var DebtMapping = map[string][]DebtRule{
 	"kev_entry": {
-		{Match: regexp.MustCompile(`(?i)vulnerable to`), Items: []string{"needMap"}},
+		{Match: regexp.MustCompile(`(?i)vulnerable to`), Items: []string{"needProvenanceCheck"}},
 	},
 	"release": {
-		{Match: regexp.MustCompile(`(?i)release`), Items: []string{"needMap", "needInvariant"}},
+		{Match: regexp.MustCompile(`(?i)release`), Items: []string{"needProvenanceCheck", "needContradictionSweep"}},
 	},
 	"maintainer_comment": {
-		{Match: regexp.MustCompile(`(?i)\b(fixed|fix released|patch available)\b`), Items: []string{"needMap", "needInvariant"}},
-		{Match: regexp.MustCompile(`(?i)\b(tested|confirmed)\b`), Items: []string{"needToyCheck", "needNullModel"}},
-		{Match: regexp.MustCompile(`(?i)\bno regression\b`), Items: []string{"needNullModel", "needObstruction"}},
-		{Match: regexp.MustCompile(`(?i)\b(security review|reviewed by)\b`), Items: []string{"needFaithfulnessReview"}},
+		{Match: regexp.MustCompile(`(?i)\b(fixed|fix released|patch available)\b`), Items: []string{"needProvenanceCheck", "needContradictionSweep"}},
+		{Match: regexp.MustCompile(`(?i)\b(tested|confirmed)\b`), Items: []string{"needBlastRadius", "needRollbackPlan"}},
+		{Match: regexp.MustCompile(`(?i)\bno regression\b`), Items: []string{"needRollbackPlan", "needVersionPin"}},
+		{Match: regexp.MustCompile(`(?i)\b(security review|reviewed by)\b`), Items: []string{"needOperatorSignoff"}},
 	},
 	"github_pr": {
-		{Match: regexp.MustCompile(`(?i)\bfix\b`), Items: []string{"needMap", "needInvariant"}},
+		{Match: regexp.MustCompile(`(?i)\bfix\b`), Items: []string{"needProvenanceCheck", "needContradictionSweep"}},
 	},
 	"github_advisory": {
-		{Match: regexp.MustCompile(`(?i)vulnerable to`), Items: []string{"needMap"}},
+		{Match: regexp.MustCompile(`(?i)vulnerable to`), Items: []string{"needProvenanceCheck"}},
 	},
 }
 

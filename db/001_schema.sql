@@ -11,9 +11,20 @@ CREATE TABLE belief (
   status      TEXT NOT NULL DEFAULT 'entered'
               CHECK (status IN ('entered','promoted','retracted')),
   -- EBP-literal: debt lives ON the idea (Lean kernel: debt : List DebtItem).
+  --
+  -- AMENDED IN PHASE 5, authorised by demo2/phase5_imp_review.md section 1. The six
+  -- items were inherited physics-proof vocabulary; they are now the deployment-review
+  -- obligations the demo is about. Same count, same order, same mechanism.
+  --
+  -- This literal and kernel.FullDebt are the two encodings of one fact. Tests B-17 and
+  -- B-23 compare them behaviourally and fail loudly on drift.
+  --
+  -- An already-created database does not re-apply this file, so the matching
+  -- ALTER COLUMN ... SET DEFAULT lives in db/004_debt_vocabulary.sql. Both are needed:
+  -- this one for fresh databases, that one for existing ones.
   debt        TEXT[] NOT NULL DEFAULT ARRAY[
-                'needMap','needInvariant','needToyCheck',
-                'needNullModel','needObstruction','needFaithfulnessReview'],
+                'needProvenanceCheck','needContradictionSweep','needBlastRadius',
+                'needRollbackPlan','needVersionPin','needOperatorSignoff'],
   final_truth BOOLEAN NOT NULL DEFAULT false,
   -- Invariant I-1/I-2: a promoted belief cannot carry debt or final-truth language.
   CONSTRAINT promoted_is_debt_free
