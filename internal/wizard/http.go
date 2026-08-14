@@ -78,13 +78,16 @@ type shellData struct {
 	Steps           []string
 }
 
+// handleShell renders the page and writes nothing.
+//
+// It used to establish the scenario here, which made fetching the page indistinguishable
+// from using it: every cookie-less GET minted a scenario and seeded it, so crawlers,
+// uptime monitors and link previews each wrote 2 beliefs, 1 edge and 1 evidence row.
+// That was observed on great-goat twice. The id was never used by the render -- the
+// template carries no scenario data at all -- so the call was pure side effect.
+//
+// Creation now happens on the first action, in resolve.
 func (s *Server) handleShell(w http.ResponseWriter, r *http.Request) {
-	// The scenario is established here so the first /api/state call has one to read.
-	if _, err := s.scenario(r.Context(), w, r); err != nil {
-		log.Printf("wizard: shell: %v", err)
-		http.Error(w, "the wizard could not prepare a scenario", http.StatusServiceUnavailable)
-		return
-	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := shell.ExecuteTemplate(w, "shell.html", shellData{
 		Prefix:          Prefix,
@@ -95,20 +98,39 @@ func (s *Server) handleShell(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// scenario resolves the judge's scenario, seeding lazily on first contact.
+// existingScenario returns the judge's scenario if their cookie names one that still
+// holds rows. It never creates, never seeds, and never sets a cookie.
+//
+// The count is not paranoia. A cookie can outlive its scenario -- resetAndSeed's
+// TRUNCATE is not scenario-scoped, and verification runs delete scenarios directly -- so
+// a syntactically valid cookie may name nothing. Treating that as "no scenario" is what
+// lets a stale visitor land on screen 1 instead of a 500.
+func (s *Server) existingScenario(ctx context.Context, r *http.Request) (string, bool) {
+	c, err := r.Cookie(cookieName)
+	if err != nil || !uuidRe.MatchString(c.Value) {
+		return "", false
+	}
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM belief WHERE scenario_id = $1::UUID`, c.Value).Scan(&n); err != nil || n == 0 {
+		return "", false
+	}
+	return c.Value, true
+}
+
+// scenario resolves the judge's scenario, seeding on first *action*.
 //
 // Lazy and per-visitor on purpose. solvent-init seeds Track 2 at deploy time; a second
-// seeder running there would race it and collide. This one runs on first request, mints
-// its own scenario id, and never truncates anything — in particular it never calls
-// resetAndSeed, whose TRUNCATE is not scenario-scoped and would take every other
-// judge's scenario with it.
+// seeder running there would race it and collide. This one runs on the first mutating
+// request, mints its own scenario id, and never truncates anything — in particular it
+// never calls resetAndSeed, whose TRUNCATE is not scenario-scoped and would take every
+// other judge's scenario with it.
+//
+// Only the mutating handlers reach this, through resolve. GET paths use
+// existingScenario, so reading the wizard cannot write to the ledger.
 func (s *Server) scenario(ctx context.Context, w http.ResponseWriter, r *http.Request) (string, error) {
-	if c, err := r.Cookie(cookieName); err == nil && uuidRe.MatchString(c.Value) {
-		var n int
-		if err := s.db.QueryRowContext(ctx,
-			`SELECT count(*) FROM belief WHERE scenario_id = $1::UUID`, c.Value).Scan(&n); err == nil && n > 0 {
-			return c.Value, nil
-		}
+	if sid, ok := s.existingScenario(ctx, r); ok {
+		return sid, nil
 	}
 	sid, err := s.NewScenario(ctx)
 	if err != nil {
@@ -132,10 +154,20 @@ func (s *Server) setCookie(w http.ResponseWriter, sid string) {
 	})
 }
 
+// handleState is a GET and therefore writes nothing.
+//
+// With no usable cookie it returns the projection instead of creating a scenario, so the
+// page renders identically for a first-time visitor and for a crawler that will never
+// come back — but only the visitor who acts causes a row to exist.
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
-	sid, err := s.scenario(r.Context(), w, r)
-	if err != nil {
-		writeErr(w, http.StatusServiceUnavailable, err)
+	sid, ok := s.existingScenario(r.Context(), r)
+	if !ok {
+		st, err := s.ProjectedState(r.Context())
+		if err != nil {
+			writeErr(w, http.StatusServiceUnavailable, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
 		return
 	}
 	st, err := s.State(r.Context(), sid)
