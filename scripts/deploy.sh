@@ -112,11 +112,23 @@ for p in /health /demo /proof /ledger; do
 done
 
 # The one smoke check that proves the instance role works: a real Bedrock embedding.
-echo "  live Bedrock search:"
+#
+# It ASSERTS the documented distance rather than printing one. A number nobody checks is
+# not a test: the first version of this script used a lowercase "is" and printed 0.365516
+# against a README that documents 0.372424, which looked like drift and was only
+# capitalisation -- the embedding is of the literal query text, so "Is" and "is" are
+# different vectors. Since retrieval proved deterministic (deployed distances byte-identical
+# to local, on a different cluster), the right move is to pin it: a genuine change of model,
+# corpus or vectors now fails the deploy instead of scrolling past.
+#
+# The query below must stay byte-identical to the one documented in README.md.
+EXPECT_ISSUE="${EXPECT_NEAREST_ISSUE:-19220}"
+EXPECT_DIST="${EXPECT_NEAREST_DISTANCE:-0.372424}"
+echo "  live Bedrock search (asserting the documented distance):"
 curl -s --max-time 60 -c /dev/null -H 'Content-Type: application/json' \
-  -d '{"query":"is etcd v3.5.x safe to deploy?"}' "$SERVICE_URL/demo/api/search" \
-  | python3 -c '
-import json, sys
+  -d '{"query":"Is etcd v3.5.x safe to deploy?"}' "$SERVICE_URL/demo/api/search" \
+  | EXPECT_ISSUE="$EXPECT_ISSUE" EXPECT_DIST="$EXPECT_DIST" python3 -c '
+import json, os, sys
 try:
     d = json.load(sys.stdin)
 except Exception:
@@ -126,9 +138,26 @@ if d.get("error"):
 hits = d.get("hits") or []
 if not hits:
     print("    FAIL: no hits"); sys.exit(1)
+top = hits[0]
 print("    model %s, %d tokens, %d hits, nearest #%d at %.6f" % (
     d.get("model"), d.get("query_tokens", 0), len(hits),
-    hits[0]["issue_number"], hits[0]["distance"]))
+    top["issue_number"], top["distance"]))
+want_issue = int(os.environ["EXPECT_ISSUE"])
+want_dist  = float(os.environ["EXPECT_DIST"])
+bad = []
+if top["issue_number"] != want_issue:
+    bad.append("nearest issue is #%d, want #%d" % (top["issue_number"], want_issue))
+if abs(top["distance"] - want_dist) >= 5e-7:
+    bad.append("distance %.6f, want %.6f" % (top["distance"], want_dist))
+if d.get("model") != "amazon.titan-embed-text-v2:0":
+    bad.append("model is %r" % d.get("model"))
+for b in bad:
+    print("    FAIL:", b)
+if bad:
+    print("    Retrieval is deterministic, so this is a real change: different model,")
+    print("    different corpus, or different vectors. Do not relax the assertion to")
+    print("    make it pass -- find out which, and update README.md if it is intended.")
+    sys.exit(1)
 ' || smoke_fail=1
 
 echo
