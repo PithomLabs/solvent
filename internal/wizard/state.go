@@ -22,13 +22,20 @@ const (
 // may name. Name is what the judge reads, and since Phase 5 replaced the debt
 // vocabulary they are the same string -- the field is kept so a future divergence has
 // somewhere to go and so the frontend never guesses which one to post.
+// ReceiptIssue and ReceiptDistance carry the citation behind a retrieval receipt, so a
+// caller that needs the values rather than the rendered string does not have to parse
+// Receipt back apart. Screen 3's closing sentence needs exactly that, and reconstructing
+// it from S.citations is what made that sentence name the wrong issue: "the first
+// considered citation" is the provenance check's, not the sweep's.
 type Check struct {
-	Item      string `json:"item"`
-	Name      string `json:"name"`
-	Prompt    string `json:"prompt"`
-	Done      bool   `json:"done"`
-	Receipt   string `json:"receipt,omitempty"`
-	Retrieval bool   `json:"retrieval"`
+	Item            string  `json:"item"`
+	Name            string  `json:"name"`
+	Prompt          string  `json:"prompt"`
+	Done            bool    `json:"done"`
+	Receipt         string  `json:"receipt,omitempty"`
+	ReceiptIssue    int     `json:"receipt_issue,omitempty"`
+	ReceiptDistance float64 `json:"receipt_distance,omitempty"`
+	Retrieval       bool    `json:"retrieval"`
 }
 
 // Citation is a selected corpus row on the record.
@@ -349,6 +356,7 @@ func (s *Server) checks(ctx context.Context, beliefID string, cites []Citation) 
 				// recomputed here -- a receipt that drifts from the row it cites is
 				// worse than no receipt.
 				c.Receipt = fmt.Sprintf("#%d · %.6f", cit.IssueNumber, cit.Distance)
+				c.ReceiptIssue, c.ReceiptDistance = cit.IssueNumber, cit.Distance
 			}
 		} else if c.Done {
 			if r, err := s.operatorReceipt(ctx, beliefID, item); err == nil && r != "" {
