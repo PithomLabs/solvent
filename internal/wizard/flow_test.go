@@ -176,6 +176,38 @@ func TestW34_RetrievalChecksEachConsumeTheirOwnCitation(t *testing.T) {
 		t.Fatalf("contradiction sweep refused with its own citation: %+v", v)
 	}
 
+	// The structured receipt fields carry the same binding, so screen 3's closing
+	// sentence can name the sweep's own issue without parsing the rendered string or
+	// re-deriving it from the citation list.
+	checkOf := func(t *testing.T, item string) wizard.Check {
+		t.Helper()
+		st, err := s.State(ctx, sid)
+		if err != nil {
+			t.Fatalf("State: %v", err)
+		}
+		for _, c := range st.Checks {
+			if c.Item == item {
+				return c
+			}
+		}
+		t.Fatalf("check %s is not in the state", item)
+		return wizard.Check{}
+	}
+	provCheck := checkOf(t, "needProvenanceCheck")
+	sweepCheck := checkOf(t, wizard.ContradictionCheck)
+	if provCheck.ReceiptIssue != first.IssueNumber || provCheck.ReceiptDistance != first.Distance {
+		t.Errorf("needProvenanceCheck receipt fields = #%d/%v, want #%d/%v",
+			provCheck.ReceiptIssue, provCheck.ReceiptDistance, first.IssueNumber, first.Distance)
+	}
+	if sweepCheck.ReceiptIssue != second.IssueNumber || sweepCheck.ReceiptDistance != second.Distance {
+		t.Errorf("%s receipt fields = #%d/%v, want #%d/%v", wizard.ContradictionCheck,
+			sweepCheck.ReceiptIssue, sweepCheck.ReceiptDistance, second.IssueNumber, second.Distance)
+	}
+	if sweepCheck.ReceiptIssue == provCheck.ReceiptIssue {
+		t.Errorf("both retrieval checks report issue #%d; the closing sentence would name "+
+			"the wrong evidence", sweepCheck.ReceiptIssue)
+	}
+
 	// The receipts name their own citation, in the order the judge selected them.
 	gotProv := receiptFor(t, "needProvenanceCheck")
 	gotSweep := receiptFor(t, wizard.ContradictionCheck)
