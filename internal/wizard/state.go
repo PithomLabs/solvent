@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/PithomLabs/solvent/internal/corpus"
 	"github.com/PithomLabs/solvent/kernel"
 )
 
@@ -21,13 +22,20 @@ const (
 // may name. Name is what the judge reads, and since Phase 5 replaced the debt
 // vocabulary they are the same string -- the field is kept so a future divergence has
 // somewhere to go and so the frontend never guesses which one to post.
+// ReceiptIssue and ReceiptDistance carry the citation behind a retrieval receipt, so a
+// caller that needs the values rather than the rendered string does not have to parse
+// Receipt back apart. Screen 3's closing sentence needs exactly that, and reconstructing
+// it from S.citations is what made that sentence name the wrong issue: "the first
+// considered citation" is the provenance check's, not the sweep's.
 type Check struct {
-	Item      string `json:"item"`
-	Name      string `json:"name"`
-	Prompt    string `json:"prompt"`
-	Done      bool   `json:"done"`
-	Receipt   string `json:"receipt,omitempty"`
-	Retrieval bool   `json:"retrieval"`
+	Item            string  `json:"item"`
+	Name            string  `json:"name"`
+	Prompt          string  `json:"prompt"`
+	Done            bool    `json:"done"`
+	Receipt         string  `json:"receipt,omitempty"`
+	ReceiptIssue    int     `json:"receipt_issue,omitempty"`
+	ReceiptDistance float64 `json:"receipt_distance,omitempty"`
+	Retrieval       bool    `json:"retrieval"`
 }
 
 // Citation is a selected corpus row on the record.
@@ -258,6 +266,15 @@ func deriveScreen(st State) string {
 	}
 }
 
+// citations reads a scenario's citations in the order the judge selected them.
+//
+// The ordering is load-bearing, not cosmetic. checks() hands one citation to each
+// retired retrieval check by position, so "which citation discharged which debt" is
+// answered by selection order — the first thing you chose retires the first retrieval
+// debt. retrieved_at is what records that, and corpus.Cite refreshes it when a
+// selection is toggled, so re-picking evidence re-orders it honestly. Ordering by
+// distance instead, as this did before, made the nearest hit the answer for every
+// retrieval check at once.
 func (s *Server) citations(ctx context.Context, scenarioID string) ([]Citation, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.belief_id::STRING, c.corpus_id::STRING, i.issue_number, i.title, i.url,
@@ -266,7 +283,7 @@ func (s *Server) citations(ctx context.Context, scenarioID string) ([]Citation, 
 		  JOIN corpus_issue i ON i.id = c.corpus_id
 		  JOIN belief b       ON b.id = c.belief_id
 		 WHERE b.scenario_id = $1::UUID
-		 ORDER BY c.relation, c.distance`, scenarioID)
+		 ORDER BY c.relation, c.retrieved_at, c.distance, c.corpus_id`, scenarioID)
 	if err != nil {
 		return nil, fmt.Errorf("wizard: read citations: %w", err)
 	}
@@ -308,26 +325,38 @@ func (s *Server) checks(ctx context.Context, beliefID string, cites []Citation) 
 		}
 	}
 
-	// Receipts for retired retrieval checks come from the citations themselves.
-	byRelation := map[string]Citation{}
+	// Receipts for retired retrieval checks come from the citations themselves, one
+	// citation per check.
+	//
+	// This used to keep a single "first considered citation" and print it against both
+	// retrieval checks, which made two independent debts look as though one issue had
+	// discharged both. It had not: dischargeFromCitation now requires an unconsumed
+	// citation per check, and this walks the same citations in the same order so the
+	// receipt on screen names the row that actually paid the debt.
+	considered := make([]Citation, 0, len(cites))
 	for _, c := range cites {
 		if c.BeliefID != beliefID {
 			continue // the ancestor's contradiction is not this belief's receipt
 		}
-		if _, seen := byRelation[c.Relation]; !seen {
-			byRelation[c.Relation] = c
+		if c.Relation == corpus.RelationConsidered {
+			considered = append(considered, c)
 		}
 	}
 
+	next := 0
 	out := make([]Check, 0, len(kernel.FullDebt))
 	for _, item := range kernel.FullDebt {
 		c := Check{Item: item, Name: item, Prompt: checkPrompts[item], Done: !outstanding[item]}
 		if retrievalChecks[item] {
 			c.Retrieval = true
-			if c.Done {
-				if cit, ok := byRelation["considered"]; ok {
-					c.Receipt = fmt.Sprintf("#%d · %.6f", cit.IssueNumber, cit.Distance)
-				}
+			if c.Done && next < len(considered) {
+				cit := considered[next]
+				next++
+				// The stored distance, as measured when the judge selected it. Never
+				// recomputed here -- a receipt that drifts from the row it cites is
+				// worse than no receipt.
+				c.Receipt = fmt.Sprintf("#%d · %.6f", cit.IssueNumber, cit.Distance)
+				c.ReceiptIssue, c.ReceiptDistance = cit.IssueNumber, cit.Distance
 			}
 		} else if c.Done {
 			if r, err := s.operatorReceipt(ctx, beliefID, item); err == nil && r != "" {

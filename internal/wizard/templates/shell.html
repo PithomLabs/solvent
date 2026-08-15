@@ -300,8 +300,17 @@ function screenFalsify() {
     // decide whether the operator's reasoning was good; it makes the reasoning explicit,
     // attributable, and structurally bounded. Explanatory copy only -- nothing here is
     // read from or asserted against the database.
-    const cited = (S.citations || []).find(c => c.relation === 'considered');
-    const citedTxt = cited ? `#${cited.issue_number} at ${Number(cited.distance).toFixed(3)}` : 'a retrieved issue';
+    // The sweep's OWN citation, read from the check the server bound it to.
+    //
+    // This used to take the first 'considered' citation in the list, which was right only
+    // by accident: citations were ordered by distance, and the nearest happened to be the
+    // sweep's. Once each retrieval check began consuming its own citation the list became
+    // selection-ordered, and "first" started naming the provenance check's issue -- so the
+    // closing sentence contradicted the receipt printed directly above it.
+    const sweep = (S.checks || []).find(c => c.item === 'needContradictionSweep');
+    const citedTxt = sweep && sweep.receipt_issue
+      ? `#${sweep.receipt_issue} at ${Number(sweep.receipt_distance).toFixed(3)}`
+      : 'a retrieved issue';
     h += `<h2>What just happened</h2>
       <p class="sub"><span class="mono">needContradictionSweep</span> was discharged by citing
       ${esc(citedTxt)}. The sweep was performed. The judgment was wrong. Solvent recorded both,

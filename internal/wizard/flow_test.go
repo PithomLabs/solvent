@@ -3,6 +3,7 @@ package wizard_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -23,19 +24,34 @@ var operatorArtifacts = map[string]string{
 // selectFirstHit runs a search and selects hit 0, returning it.
 func selectFirstHit(t *testing.T, s *wizard.Server, sid, beliefID, query string) wizard.Hit {
 	t.Helper()
+	return selectHits(t, s, beliefID, query, 1)[0]
+}
+
+// selectHits runs a search and selects the first n hits, in order.
+//
+// The two retrieval checks each consume their own citation, so any fixture that
+// discharges the full debt needs two selections. Selecting one and discharging both
+// used to work and no longer does: that was the bug where a single issue retired both
+// the provenance check and the contradiction sweep.
+func selectHits(t *testing.T, s *wizard.Server, beliefID, query string, n int) []wizard.Hit {
+	t.Helper()
 	ctx := context.Background()
 	res, err := s.Search(ctx, beliefID, query)
 	if err != nil {
 		t.Fatalf("Search(%q): %v", query, err)
 	}
-	if len(res.Hits) == 0 {
-		t.Fatalf("Search(%q) returned no hits; the corpus partition is empty", query)
+	if len(res.Hits) < n {
+		t.Fatalf("Search(%q) returned %d hits, need %d; the corpus partition is too small",
+			query, len(res.Hits), n)
 	}
-	h := res.Hits[0]
-	if err := s.Select(ctx, beliefID, h.CorpusID, query, h.Distance, true); err != nil {
-		t.Fatalf("Select: %v", err)
+	out := make([]wizard.Hit, 0, n)
+	for _, h := range res.Hits[:n] {
+		if err := s.Select(ctx, beliefID, h.CorpusID, query, h.Distance, true); err != nil {
+			t.Fatalf("Select: %v", err)
+		}
+		out = append(out, h)
 	}
-	return h
+	return out
 }
 
 // --- W-06: the third refusal ---------------------------------------------------
@@ -79,6 +95,133 @@ func TestW06_ContradictionSweepRefusedWithoutACitation(t *testing.T) {
 	}
 }
 
+// --- W-34: one citation cannot retire two retrieval debts ----------------------
+
+// The provenance check and the contradiction sweep are independent obligations, and
+// each must name the row that actually paid it.
+//
+// Before this was fixed, checks() kept a single "first considered citation" and printed
+// it against both retrieval rows, while dischargeFromCitation asked only whether ANY
+// citation existed. Two debts, one issue, two identical receipts — on the live demo both
+// rows read `#14139 · 0.199509`, which says the sweep was answered by the same evidence
+// as the provenance check. That is not a sweep.
+func TestW34_RetrievalChecksEachConsumeTheirOwnCitation(t *testing.T) {
+	ctx := context.Background()
+	plantCorpus(t, 4)
+	s := newServer(t, &fakeEmbedder{})
+	sid := seeded(t, s)
+	bid := beliefOf(t, s, sid)
+
+	receipt := func(h wizard.Hit) string {
+		return fmt.Sprintf("#%d · %.6f", h.IssueNumber, h.Distance)
+	}
+	receiptFor := func(t *testing.T, item string) string {
+		t.Helper()
+		st, err := s.State(ctx, sid)
+		if err != nil {
+			t.Fatalf("State: %v", err)
+		}
+		for _, c := range st.Checks {
+			if c.Item == item {
+				return c.Receipt
+			}
+		}
+		t.Fatalf("check %s is not in the state", item)
+		return ""
+	}
+
+	// One citation retires the first retrieval debt and nothing more.
+	first := selectHits(t, s, bid, "one citation", 1)[0]
+	if v := s.Discharge(ctx, sid, bid, "needProvenanceCheck", ""); !v.OK {
+		t.Fatalf("provenance check refused with a citation on the record: %+v", v)
+	}
+	v := s.Discharge(ctx, sid, bid, wizard.ContradictionCheck, "")
+	if v.OK {
+		t.Fatal("the contradiction sweep reused the citation the provenance check spent")
+	}
+	if want := wizard.SpentCitationDetail(wizard.ContradictionCheck); v.Detail != want {
+		t.Errorf("detail = %q, want %q", v.Detail, want)
+	}
+	if v.SQLState != "23514" {
+		t.Errorf("sqlstate = %q, want 23514", v.SQLState)
+	}
+	// No constraint name: the application raised this, not the engine.
+	if v.Constraint != "" {
+		t.Errorf("constraint = %q, want empty; no constraint produced this refusal", v.Constraint)
+	}
+	// And it is not the no-citation refusal, which means something different.
+	if v.Detail == wizard.NoCitationDetail {
+		t.Error("a spent citation was reported as no citation at all")
+	}
+
+	// A second citation, and the sweep discharges against that one.
+	res, err := s.Search(ctx, bid, "one citation")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	var second wizard.Hit
+	for _, h := range res.Hits {
+		if h.CorpusID != first.CorpusID {
+			second = h
+			break
+		}
+	}
+	if second.CorpusID == "" {
+		t.Fatal("the planted corpus returned only one distinct row")
+	}
+	if err := s.Select(ctx, bid, second.CorpusID, "one citation", second.Distance, true); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	if v := s.Discharge(ctx, sid, bid, wizard.ContradictionCheck, ""); !v.OK {
+		t.Fatalf("contradiction sweep refused with its own citation: %+v", v)
+	}
+
+	// The structured receipt fields carry the same binding, so screen 3's closing
+	// sentence can name the sweep's own issue without parsing the rendered string or
+	// re-deriving it from the citation list.
+	checkOf := func(t *testing.T, item string) wizard.Check {
+		t.Helper()
+		st, err := s.State(ctx, sid)
+		if err != nil {
+			t.Fatalf("State: %v", err)
+		}
+		for _, c := range st.Checks {
+			if c.Item == item {
+				return c
+			}
+		}
+		t.Fatalf("check %s is not in the state", item)
+		return wizard.Check{}
+	}
+	provCheck := checkOf(t, "needProvenanceCheck")
+	sweepCheck := checkOf(t, wizard.ContradictionCheck)
+	if provCheck.ReceiptIssue != first.IssueNumber || provCheck.ReceiptDistance != first.Distance {
+		t.Errorf("needProvenanceCheck receipt fields = #%d/%v, want #%d/%v",
+			provCheck.ReceiptIssue, provCheck.ReceiptDistance, first.IssueNumber, first.Distance)
+	}
+	if sweepCheck.ReceiptIssue != second.IssueNumber || sweepCheck.ReceiptDistance != second.Distance {
+		t.Errorf("%s receipt fields = #%d/%v, want #%d/%v", wizard.ContradictionCheck,
+			sweepCheck.ReceiptIssue, sweepCheck.ReceiptDistance, second.IssueNumber, second.Distance)
+	}
+	if sweepCheck.ReceiptIssue == provCheck.ReceiptIssue {
+		t.Errorf("both retrieval checks report issue #%d; the closing sentence would name "+
+			"the wrong evidence", sweepCheck.ReceiptIssue)
+	}
+
+	// The receipts name their own citation, in the order the judge selected them.
+	gotProv := receiptFor(t, "needProvenanceCheck")
+	gotSweep := receiptFor(t, wizard.ContradictionCheck)
+	if gotProv == gotSweep {
+		t.Fatalf("both retrieval checks show the same receipt %q; they collapsed onto one citation", gotProv)
+	}
+	if want := receipt(first); gotProv != want {
+		t.Errorf("needProvenanceCheck receipt = %q, want %q (the first selection)", gotProv, want)
+	}
+	if want := receipt(second); gotSweep != want {
+		t.Errorf("%s receipt = %q, want %q (the second selection)", wizard.ContradictionCheck, gotSweep, want)
+	}
+}
+
 // --- W-07: the whole gate, and a non-vacuous audit -----------------------------
 
 // The phase's end-to-end path. The assertion that matters most is the last one: a live
@@ -104,7 +247,7 @@ func TestW07_FullDischargeThenPromoteThenAuthorize(t *testing.T) {
 	}
 
 	// Screen 2: a citation, then all six checks.
-	selectFirstHit(t, s, sid, bid, "data inconsistency after upgrade")
+	selectHits(t, s, bid, "data inconsistency after upgrade", 2)
 	for _, item := range kernel.FullDebt {
 		v := s.Discharge(ctx, sid, bid, item, operatorArtifacts[item])
 		if !v.OK {
@@ -342,7 +485,7 @@ func TestW12_PromoteAndAuthorizeHaveNoScreenDependence(t *testing.T) {
 	}
 
 	// Discharge everything, which is the only thing that changed.
-	selectFirstHit(t, s, sid, bid, "same-sql check")
+	selectHits(t, s, bid, "same-sql check", 2)
 	for _, item := range kernel.FullDebt {
 		if v := s.Discharge(ctx, sid, bid, item, operatorArtifacts[item]); !v.OK {
 			t.Fatalf("discharge %s: %+v", item, v)
@@ -447,7 +590,7 @@ func TestW14_StateIsDerivedNotRemembered(t *testing.T) {
 		{"fresh", func() {}, wizard.ScreenAsk},
 		{"after refusal", func() { s.Promote(ctx, sid, bid) }, wizard.ScreenDischarge},
 		{"after discharge", func() {
-			selectFirstHit(t, s, sid, bid, "reload check")
+			selectHits(t, s, bid, "reload check", 2)
 			for _, item := range kernel.FullDebt {
 				s.Discharge(ctx, sid, bid, item, operatorArtifacts[item])
 			}
