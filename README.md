@@ -7,6 +7,8 @@ action is allowed.
 Also live: [`/proof`](https://byb43s8nh2.us-west-2.awsapprunner.com/proof) (the control experiment)
 and [`/ledger`](https://byb43s8nh2.us-west-2.awsapprunner.com/ledger) (read-only ledger).
 
+![Solvent](solvent.png)
+
 ---
 
 ## What Solvent is
@@ -48,6 +50,8 @@ AWS App Runner  us-west-2       Go binary, no framework, ~25 MB image from ECR
       ↓  pgx
 CockroachDB Cloud Serverless    v26.2.5 · multi-region · primary region aws-us-west-2
 ```
+
+![Architecture](architecture.png)
 
 App Runner's region and the cluster's primary region are the same, so no request in the demo path
 pays a cross-region round trip. `task deploy` refuses to deploy if that stops being true.
