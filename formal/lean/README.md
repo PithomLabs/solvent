@@ -85,3 +85,25 @@ Assert zero unproved goals or axioms:
 ```bash
 grep -RniE 'sorry|admit|axiom' Solvent/
 ```
+
+---
+
+## 5. Abstraction Boundary
+
+The Lean model proves properties of an **abstract state machine**. The following notes identify where the abstraction intentionally diverges from the production Go/CockroachDB implementation.
+
+### 5.1 `authorizeIntent` — abstract update vs production insert
+
+The Lean `authorizeIntent` transition updates an existing intent's `state` to `live` and `beliefStatus` to `promoted`, without checking the intent's current state. The production Go kernel's `IntentOnPromoted` (kernel/kernel.go) performs an `INSERT INTO action_intent`, which creates a new intent row rather than updating an existing one. The composite FK `gate` constraint prevents the insert unless the referenced belief is currently promoted.
+
+The Lean model does not check the intent's current `state` before authorization; the production insert sidesteps this by never encountering an existing row. Both paths preserve the `ValidLedger` invariants, but the Lean transition is broader in what it permits.
+
+### 5.2 `retractCascade` — broader retraction vs promoted-only SQL
+
+The Lean `retractCascade` retracts all beliefs in the affected set regardless of their current `BeliefStatus`. The production SQL (`sqlRetractCascadeRetract` in kernel/sql.go) applies `WHERE status = 'promoted'`, updating only beliefs currently in the `promoted` state.
+
+The Lean abstraction permits a broader retraction than the production SQL behavior; the stated invariants are still preserved. The broader retraction only makes retraction easier (more beliefs retracted → more intents cancelled → fewer live intents on non-promoted beliefs), so the theorems remain sound.
+
+### 5.3 `edges` — list representation vs production uniqueness constraint
+
+The Lean `edges : List (BeliefId × BeliefId × EdgeKind)` does not encode the production `PRIMARY KEY (parent_id, child_id)` uniqueness constraint on `belief_edge`. Duplicate edges may appear in the list. This does not affect the stated invariants because `derivesChildren` uses `filterMap` (preserving duplicates in output) and the invariant predicates use `∈` (set membership, not multiplicity). Duplicate edges may cause `affectedBeliefs` to visit a node more than once, but the `reachableDerives` visited-list check prevents redundant traversal.
