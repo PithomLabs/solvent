@@ -83,10 +83,19 @@ echo -n "Initializing database '${SOLVENT_DB_NAME}'..."
 docker exec "$SOLVENT_CRDB_CONTAINER" cockroach sql --insecure \
   -e "CREATE DATABASE IF NOT EXISTS ${SOLVENT_DB_NAME}" >/dev/null
 
-docker exec -i "$SOLVENT_CRDB_CONTAINER" cockroach sql --insecure \
-  --database="$SOLVENT_DB_NAME" < "$REPO_ROOT/db/001_schema.sql" >/dev/null
+# Base-schema existence check (not data-presence): 001_schema.sql has frozen non-idempotent
+# CREATE TABLE statements and must only run on a fresh database.
+if ! docker exec "$SOLVENT_CRDB_CONTAINER" cockroach sql --insecure \
+  --database="$SOLVENT_DB_NAME" -e "SELECT 1 FROM belief LIMIT 1" &>/dev/null; then
+  docker exec -i "$SOLVENT_CRDB_CONTAINER" cockroach sql --insecure \
+    --database="$SOLVENT_DB_NAME" < "$REPO_ROOT/db/001_schema.sql" >/dev/null
+fi
 docker exec -i "$SOLVENT_CRDB_CONTAINER" cockroach sql --insecure \
   --database="$SOLVENT_DB_NAME" < "$REPO_ROOT/db/002_corpus.sql" >/dev/null
+docker exec -i "$SOLVENT_CRDB_CONTAINER" cockroach sql --insecure \
+  --database="$SOLVENT_DB_NAME" < "$REPO_ROOT/db/003_wizard.sql" >/dev/null
+docker exec -i "$SOLVENT_CRDB_CONTAINER" cockroach sql --insecure \
+  --database="$SOLVENT_DB_NAME" < "$REPO_ROOT/db/004_debt_vocabulary.sql" >/dev/null
 echo " OK"
 
 # --- Verify ---

@@ -1,21 +1,22 @@
+````markdown
 # Solvent
 
 A transactional belief ledger for autonomous agents. The database — not the LLM — decides whether an
 action is allowed.
 
-**Live demo: https://byb43s8nh2.us-west-2.awsapprunner.com/demo**
+**Live demo: https://byb43s8nh2.us-west-2.awsapprunner.com/demo**  
+**Demo video: https://www.youtube.com/watch?v=EtFUaCnbHPA**
+
 Also live: [`/proof`](https://byb43s8nh2.us-west-2.awsapprunner.com/proof) (the control experiment)
 and [`/ledger`](https://byb43s8nh2.us-west-2.awsapprunner.com/ledger) (read-only ledger).
 
 ![Solvent](solvent.png)
 
----
-
 ## What Solvent is
 
 Persistent memory for evidence, authority, and change, built around one separation:
 
-```
+```text
 Memory / Retrieval
        ↓
 Belief
@@ -23,7 +24,7 @@ Belief
 Authority
        ↓
 CockroachDB invariant
-```
+````
 
 > **Retrieval and judgment are allowed to be wrong. Authority is what the database constrains.**
 
@@ -42,7 +43,7 @@ Solvent does not claim better retrieval. It claims that retrieval must not silen
 
 ## Architecture
 
-```
+```text
 Judge's browser
       ↓  HTTPS
 AWS App Runner  us-west-2       Go binary, no framework, ~25 MB image from ECR
@@ -63,11 +64,11 @@ of handlers.
 
 ## Three demo beats
 
-| Screen | What you do | What the database says |
-|---|---|---|
-| **ASK** | Search 7,239 real etcd issues, then try to promote the belief and authorize the deployment | `23514 · promoted_is_debt_free` and `23503 · gate` |
-| **DISCHARGE** | Cite retrieved evidence and record six review obligations | The contradiction sweep is refused until something is actually cited |
-| **FALSIFY** | Introduce the incident that destroys the belief, then try to retract it | `23514 · live_requires_promoted` — the retraction cannot leave a live intent behind |
+| Screen        | What you do                                                                                | What the database says                                                              |
+| ------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| **ASK**       | Search 7,239 real etcd issues, then try to promote the belief and authorize the deployment | `23514 · promoted_is_debt_free` and `23503 · gate`                                  |
+| **DISCHARGE** | Cite retrieved evidence and record six review obligations                                  | The contradiction sweep is refused until something is actually cited                |
+| **FALSIFY**   | Introduce the incident that destroys the belief, then try to retract it                    | `23514 · live_requires_promoted` — the retraction cannot leave a live intent behind |
 
 Between the second and third beat the *same two statements* that were refused now commit, unchanged:
 the intent `deploy etcd v3.5.28` goes live while the audit reads `live_on_nonpromoted = 0`. The safe
@@ -83,7 +84,7 @@ This is a measured limitation, not a caveat, and it is why the product is shaped
 
 Ask the corpus the question an engineer would actually ask before a deployment:
 
-```
+```text
 "Is etcd v3.5.x safe to deploy?"
   #19220  0.372424   go.etcd.io/etcd/client/v3 updates
   #12987  0.387913   3.4 to 3.5 upgrade may panic
@@ -92,7 +93,7 @@ Ask the corpus the question an engineer would actually ask before a deployment:
 
 Plausible, on-topic, and it does not contain the incident that matters. Ask about integrity instead:
 
-```
+```text
 "etcd v3.5 data inconsistency after upgrade"
   #14139  0.199509   inconsistent data in etcd 3.5.4
 ```
@@ -146,22 +147,67 @@ enforces the invariant at the authority boundary.** That distinction matters if 
 The same race, the same correct application logic, three schemas. Served at
 [`/proof`](https://byb43s8nh2.us-west-2.awsapprunner.com/proof).
 
-| Cell | Schema | Isolation | Observed | Where |
-|---|---|---|---|---|
-| 1 | naive | `READ COMMITTED` | no error, both transactions commit, **AUDIT = 1** | local, v26.2.0 |
-| 2 | naive | `SERIALIZABLE` | `40001 RETRY_SERIALIZABLE` | local, v26.2.0 |
-| 3 | hardened | `READ COMMITTED` | `23503 · gate` | deployed cluster, v26.2.5 |
+| Cell | Schema   | Isolation        | Observed                                          | Where                     |
+| ---- | -------- | ---------------- | ------------------------------------------------- | ------------------------- |
+| 1    | naive    | `READ COMMITTED` | no error, both transactions commit, **AUDIT = 1** | local, v26.2.0            |
+| 2    | naive    | `SERIALIZABLE`   | `40001 RETRY_SERIALIZABLE`                        | local, v26.2.0            |
+| 3    | hardened | `READ COMMITTED` | `23503 · gate`                                    | deployed cluster, v26.2.5 |
 
 Cells 1 and 2 run locally on purpose — the naive strawman must never touch the judge-facing cluster.
 
 Two readings the transcripts insist on:
 
-- **`40001` is a retry signal, not a refusal.** The harness deliberately does not retry, so the raw
+* **`40001` is a retry signal, not a refusal.** The harness deliberately does not retry, so the raw
   code is visible. Under `crdb.ExecuteTx` the transaction retries and *then* refuses on fresh state.
   The accurate chain is **detect → retry → refusal on fresh state**.
-- **Cell 1 was observed, not predicted.** The anomaly was inherited from a PostgreSQL-era claim and
+* **Cell 1 was observed, not predicted.** The anomaly was inherited from a PostgreSQL-era claim and
   had never been run against CockroachDB. It reproduced. The corruption came from the schema, not
   from a logic bug.
+
+## Formal model
+
+`formal/lean/` contains a **Lean 4 + Mathlib formal model** of Solvent's belief/authority state
+machine.
+
+It machine-checks that the core authority invariants are preserved by the successful abstract
+state transitions:
+
+* `promote_preserves_validity`
+* `cancelIntent_preserves_validity`
+* `authorizeIntent_preserves_validity`
+* `retractCascade_preserves_validity`
+
+It also proves the central authority properties:
+
+* `live_intent_implies_promoted`
+* `no_live_intent_on_retracted_belief`
+
+and the layered promotion/cascade properties:
+
+* `promotion_updates_dependent_intent`
+* `cascade_retraction_updates_dependent_intent`
+* `cascade_retraction_cannot_leave_live_intent`
+* `cascade_update_preserves_gate`
+* `cascade_retraction_blocks_live_intent`
+
+The Lean model uses the same core vocabulary as the schema — beliefs, debt, intents, statuses, and
+belief dependencies — and is pinned to Lean 4.33.0 with a specific Mathlib revision.
+
+The formalization is intentionally scoped:
+
+> **Lean proves the abstract state-machine preservation properties. CockroachDB proves the real engine's
+> refusal behavior empirically.**
+
+This is **not** a machine-checked refinement proof of the Go/CockroachDB implementation.
+
+Build the formal model with:
+
+```bash
+cd formal/lean
+lake build
+```
+
+The formal modules contain zero `sorry`, zero `admit`, and zero unchecked `axiom`.
 
 ## Run and deploy
 
@@ -181,14 +227,14 @@ every deployed measurement here came from.
 
 ## Verification evidence
 
-| Evidence | What it shows |
-|---|---|
-| `proof/isolation.log` | The three-cell control experiment, with raw SQLSTATEs |
-| `proof/act6_tier_probe.log` | `CHECK` re-evaluation on cascade, verified on the deployed cluster |
-| `docs/M2_TRANSCRIPT.md` | Kernel behaviour against a live cluster, per-case SQLSTATE and constraint |
-| `docs/M1_I7.md` | Invariant I-7 — every write goes through `crdb.ExecuteTx` |
-| `corpus-data/*.meta.json` | Fetch provenance and embedding checkpoint, digest-pinned |
-| `scripts/deploy.sh` step 6 | Asserts `#19220 / 0.372424` against the deployed service on every deploy, tolerance `5e-7` |
+| Evidence                    | What it shows                                                                              |
+| --------------------------- | ------------------------------------------------------------------------------------------ |
+| `proof/isolation.log`       | The three-cell control experiment, with raw SQLSTATEs                                      |
+| `proof/act6_tier_probe.log` | `CHECK` re-evaluation on cascade, verified on the deployed cluster                         |
+| `docs/M2_TRANSCRIPT.md`     | Kernel behaviour against a live cluster, per-case SQLSTATE and constraint                  |
+| `docs/M1_I7.md`             | Invariant I-7 — every write goes through `crdb.ExecuteTx`                                  |
+| `corpus-data/*.meta.json`   | Fetch provenance and embedding checkpoint, digest-pinned                                   |
+| `scripts/deploy.sh` step 6  | Asserts `#19220 / 0.372424` against the deployed service on every deploy, tolerance `5e-7` |
 
 Run `task test` for the current suite result rather than trusting a number written here.
 
@@ -198,19 +244,19 @@ in `corpus-data/`. It is the measured ingested set, never GitHub's live issue co
 
 ## Hackathon tool usage
 
-| | Tool | Status |
-|---|---|---|
+|   | Tool                            | Status   |
+| - | ------------------------------- | -------- |
 | 1 | **Distributed Vector Indexing** | verified |
-| 2 | **ccloud CLI** | verified |
+| 2 | **ccloud CLI**                  | verified |
 
-- **Distributed Vector Indexing** — `corpus_issue.embedding` is a `VECTOR(1024)` column served by
+* **Distributed Vector Indexing** — `corpus_issue.embedding` is a `VECTOR(1024)` column served by
   CockroachDB's native vector index, `corpus_issue_embedding_idx (scenario_id, embedding
   vector_cosine_ops)`, on a multi-region cluster. The scenario prefix isolates each session's
   retrieval. All 7,239 rows carry a genuine Titan v2 embedding, and `/demo` performs live cosine ANN
   retrieval (`<=>`) on every query; query plans are asserted to use the index with bounded prefix
   spans. *(We claim a CockroachDB-native vector index on a multi-region cluster — we have not
   measured index distribution or sharding, and do not claim it.)*
-- **ccloud CLI** — used interactively for cluster introspection, and programmatically by
+* **ccloud CLI** — used interactively for cluster introspection, and programmatically by
   `task deploy` as a fail-closed JSON preflight: `scripts/ccloud_preflight.sh` parses
   `ccloud cluster list --output json` and aborts the deploy if cluster identity, cloud provider,
   version, state, or primary region is not what the deployment expects.
@@ -228,4 +274,4 @@ a local subprocess, not a hosted service. See `AGENTS.md`.
 
 ## License
 
-MIT.
+[MIT](https://github.com/PithomLabs/solvent/blob/main/LICENSE)

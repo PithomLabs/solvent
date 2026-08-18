@@ -50,3 +50,7 @@ go.work
 # `task corpus:fetch`, so there is no reason to track it.
 /corpus-data/
 *.ndjson
+
+# Lean 4 / Lake build cache and dependencies
+formal/lean/.lake/
+
