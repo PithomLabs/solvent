@@ -1,4 +1,3 @@
-```markdown
 # Solvent
 
 A transactional belief ledger for autonomous agents. The database — not the LLM — decides whether an
