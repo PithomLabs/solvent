@@ -1,0 +1,58 @@
+task: [inspect] bash scripts/demo/inspect.sh
+=== SOLVENT LEDGER ===
+
+--- BELIEFS ---
+  ID:         54b0f478-bda0-49ca-b7d2-4de5514369c2
+  Scenario:   00000000-0000-0000-0000-000000000001
+  Type:       accommodated
+  Status:     entered
+  Claim:      fix available for etcd-io/etcd v3.5.27
+  Debt:       {needToyCheck,needNullModel,needObstruction,needFaithfulnessReview}
+
+  ID:         f770a19a-a7e8-4f91-9505-6d578289b646
+  Scenario:   00000000-0000-0000-0000-000000000001
+  Type:       accommodated
+  Status:     entered
+  Claim:      fix available for etcd-io/etcd v3.5.28
+  Debt:       {needToyCheck,needNullModel,needObstruction,needFaithfulnessReview}
+
+  ID:         df121984-b50c-4c02-a21b-a692aa1a8f9e
+  Scenario:   00000000-0000-0000-0000-000000000001
+  Type:       derived
+  Status:     entered
+  Claim:      go/go.etcd.io/etcd/v3 >=3.5.0, <3.5.28 is vulnerable to GHSA-q8m4-xhhv-38mg
+  Debt:       {needInvariant,needToyCheck,needNullModel,needObstruction,needFaithfulnessReview}
+
+  ID:         cbb998ea-4404-429d-b0fe-e1581cfb1ed9
+  Scenario:   00000000-0000-0000-0000-000000000002
+  Type:       postulated
+  Status:     entered
+  Claim:      etcd v3.5.0 is approved for production deployment (decision as of 2021-06-16)
+  Debt:       {needMap,needInvariant,needToyCheck,needNullModel,needObstruction,needFaithfulnessReview}
+
+--- EVIDENCE ---
+  ID:         725e0ce1-2dc5-444e-b1b7-9879b4939f31
+  Belief:     54b0f478-bda0-49ca-b7d2-4de5514369c2
+  Class:      external_feed
+  URL:        https://github.com/etcd-io/etcd/releases/tag/v3.5.27
+
+  ID:         e2621b5c-a88c-4c5d-bb82-b618e198f64c
+  Belief:     cbb998ea-4404-429d-b0fe-e1581cfb1ed9
+  Class:      external_feed
+  URL:        https://github.com/etcd-io/etcd/releases/tag/v3.5.0
+
+  ID:         eeab293f-4fb8-403a-bfe6-01aa5164bc24
+  Belief:     df121984-b50c-4c02-a21b-a692aa1a8f9e
+  Class:      external_feed
+  URL:        https://github.com/advisories/GHSA-q8m4-xhhv-38mg
+
+  ID:         6c83a12c-7d23-401d-8ff2-9123b028c7bb
+  Belief:     f770a19a-a7e8-4f91-9505-6d578289b646
+  Class:      external_feed
+  URL:        https://github.com/etcd-io/etcd/releases/tag/v3.5.28
+
+--- INTENTS ---
+--- AUDIT ---
+  Live intents on non-promoted beliefs: 0 (SAFE)
+
+=== END LEDGER ===

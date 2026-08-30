@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solvent — Audit</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    .nav { padding: 1rem 2rem; border-bottom: 1px solid #222; display: flex; gap: 2rem; align-items: center; }
+    .nav a { color: #888; text-decoration: none; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.1em; }
+    .nav a:hover { color: #fff; }
+    .nav .brand { color: #fff; font-weight: 600; font-size: 1rem; letter-spacing: 0.05em; margin-right: auto; }
+    .container { max-width: 800px; margin: 2rem auto; padding: 0 2rem; }
+    h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.15em; color: #666; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid #222; }
+    .audit-result { font-size: 1.5rem; margin: 2rem 0; }
+    .safe { color: #4a4; }
+    .unsafe { color: #a44; }
+    .explain { font-size: 0.85rem; color: #888; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <a href="/" class="brand">SOLVENT</a>
+    <a href="/ledger">Ledger</a>
+    <a href="/beliefs">Beliefs</a>
+    <a href="/evidence">Evidence</a>
+    <a href="/intents">Intents</a>
+    <a href="/audit">Audit</a>
+  </nav>
+
+  <div class="container">
+    <h2>Safety Audit</h2>
+    {{if eq . 0}}
+      <div class="audit-result safe">SAFE</div>
+      <p class="explain">
+        No live action intents are resting on unpromoted beliefs.
+        Every active intent cites a belief that has been promoted (debt-free and approved).
+      </p>
+    {{else}}
+      <div class="audit-result unsafe">VIOLATION: {{.}}</div>
+      <p class="explain">
+        {{.}} live action intent(s) cite beliefs that have not been promoted.
+        This violates the Solvent invariant: a live intent may only reference a promoted belief.
+      </p>
+    {{end}}
+
+    <div style="margin-top: 2rem;">
+      <a href="/ledger">← Back to Ledger</a>
+    </div>
+  </div>
+</body>
+</html>

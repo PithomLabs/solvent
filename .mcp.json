@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "solvent": {
+      "command": "bin/solvent-mcp",
+      "args": [],
+      "env": {
+        "FABLE_DSN": "postgresql://root@localhost:26260/fable?sslmode=disable",
+        "SOLVENT_FIXTURE_ROOT": "internal/derive/testdata/etcd_real"
+      }
+    }
+  }
+}

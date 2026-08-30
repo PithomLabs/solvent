@@ -1,0 +1,68 @@
+[
+  {
+    "evidence_id": "ev_ghsa_q8m4_xhhv_38mg",
+    "source_url": "https://github.com/advisories/GHSA-q8m4-xhhv-38mg",
+    "source_id": "GHSA-q8m4-xhhv-38mg",
+    "source_type": "GITHUB_ADVISORY",
+    "retrieval_date": "2026-08-01T00:00:00Z",
+    "publication_date": "2026-03-20T20:48:14Z",
+    "raw_payload": {
+      "cve_id": "CVE-2026-33413",
+      "summary": "etcd: Authorization bypasses in multiple APIs",
+      "severity": "HIGH",
+      "affected_range": ">=3.5.0, <3.5.28",
+      "fixed_version": "3.5.28"
+    }
+  },
+  {
+    "evidence_id": "ev_rel_v3527",
+    "source_url": "https://github.com/etcd-io/etcd/releases/tag/v3.5.27",
+    "source_id": "v3.5.27",
+    "source_type": "RELEASE_METADATA",
+    "retrieval_date": "2026-08-01T00:00:00Z",
+    "publication_date": "2026-02-10T00:00:00Z",
+    "raw_payload": {
+      "version": "3.5.27",
+      "is_prerelease": false
+    }
+  },
+  {
+    "evidence_id": "ev_rel_v3528",
+    "source_url": "https://github.com/etcd-io/etcd/releases/tag/v3.5.28",
+    "source_id": "v3.5.28",
+    "source_type": "RELEASE_METADATA",
+    "retrieval_date": "2026-08-01T00:00:00Z",
+    "publication_date": "2026-03-20T00:00:00Z",
+    "raw_payload": {
+      "version": "3.5.28",
+      "is_prerelease": false
+    }
+  },
+  {
+    "evidence_id": "ev_postmortem_v35",
+    "source_url": "https://github.com/etcd-io/etcd/blob/main/Documentation/postmortems/v3.5-data-inconsistency.md",
+    "source_id": "POSTMORTEM-v3.5-CORRUPT",
+    "source_type": "POSTMORTEM",
+    "retrieval_date": "2026-08-01T00:00:00Z",
+    "publication_date": "2022-04-20T00:00:00Z",
+    "raw_payload": {
+      "affected_versions": ["3.5.0", "3.5.1", "3.5.2"],
+      "fixed_version": "3.5.3",
+      "issue_keys": ["#13514", "#13654", "#13766"]
+    }
+  },
+  {
+    "evidence_id": "ev_synth_vendor_override",
+    "source_url": "https://synthetic.local/advisories/OVERRIDE-2026-01",
+    "source_id": "SYNTH-OVERRIDE-01",
+    "source_type": "SYNTHETIC_OVERRIDE",
+    "retrieval_date": "2026-08-01T00:00:00Z",
+    "publication_date": "2026-03-21T00:00:00Z",
+    "is_synthetic": true,
+    "raw_payload": {
+      "target_version": "3.5.27",
+      "asserts_unaffected": true,
+      "cve_id": "CVE-2026-33413"
+    }
+  }
+]

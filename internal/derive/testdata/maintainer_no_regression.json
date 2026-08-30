@@ -1,0 +1,9 @@
+{
+  "comment_id": 220123457,
+  "issue_or_pr_number": 17234,
+  "repository": "etcd-io/etcd",
+  "author": "serathius",
+  "body": "Confirmed no regression. All existing tests pass and the fix resolves the vulnerability.",
+  "created_at": "2024-06-13T14:30:00Z",
+  "is_maintainer": true
+}

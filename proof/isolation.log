@@ -1,0 +1,157 @@
+================================================================================
+proof/isolation.log — the three-cell isolation experiment, on CockroachDB
+================================================================================
+
+Produced by:  bash proof/harness/cells_crdb.sh --dsn "$DSN" --cells <n>
+
+This supersedes proof/harness/cells.sh, which is a PostgreSQL artifact and was
+never ported. PHASE0_REPORT.md:83 recorded that plainly: "any claim that the
+isolation experiment is proven on CRDB is false today." That is no longer true.
+
+  CELLS 1 + 2   local     CockroachDB CCL v26.2.0  (docker solvent-crdb, fable)
+  CELL  3       cloud     CockroachDB CCL v26.2.5  (great-goat, fable)
+
+Cells 1 and 2 use a deliberately naive comparison table, which is a strawman and
+has no business on the judge-facing cluster, so they ran locally. Cell 3 uses the
+REAL hardened action_intent, so it ran on great-goat. Every run happened inside a
+disposable `probe_iso` schema built from db/001_schema.sql and dropped afterwards;
+the four frozen ledger tables were never written to on either database.
+
+RESULT — all three cells match IMPLEMENTATION_CONTRACT.md:177-178:
+
+  CELL 1  naive schema  @ READ COMMITTED  -> no error, both txns COMMIT,
+                                             one LIVE intent survives on a
+                                             retracted belief.  AUDIT = 1
+  CELL 2  naive schema  @ SERIALIZABLE    -> 40001 RETRY_SERIALIZABLE.  AUDIT = 0
+  CELL 3  hardened gate @ READ COMMITTED  -> 23503 · gate.              AUDIT = 0
+
+HOW TO READ CELL 1. The PostgreSQL-era anomaly DOES reproduce on CockroachDB.
+This was not assumed — demo2/ui_review.md:1486 warned against pre-writing this
+result, so it was left open until observed. Both transactions ran CORRECT
+application logic: the writer checked the belief's status and saw 'promoted'; the
+cascade cancelled live intents before retracting. The corruption comes from the
+SCHEMA, not from a logic bug, which is the entire point of the experiment.
+
+HOW TO READ CELL 2. 40001 is a RETRY signal, not a refusal — the distinction
+matters and demo2/ui_review.md:1482 calls it the first thing a Cockroach Labs
+judge will check. This harness deliberately does NOT retry, so the raw 40001 is
+visible. In production the same body runs inside crdb.ExecuteTx, which retries;
+the retry re-reads the belief's status and the constraint then refuses on fresh
+state. The honest chain is: detect -> retry -> refusal on fresh state.
+
+HOW TO READ CELL 3. This is the cell that matters, and it ran on the deployed
+cluster. Under the SAME isolation level that silently corrupts the naive schema,
+the hardened composite FK refuses the insert outright. No retry, no anomaly, and
+the audit invariant holds.
+
+The cloud DSN, host and credentials are redacted throughout.
+
+
+################################################################################
+# CELLS 1 + 2 — LOCAL — CockroachDB v26.2.0 — naive schema
+################################################################################
+
+==============================================================
+cells_crdb.sh — CockroachDB isolation experiment
+==============================================================
+server:  CockroachDB CCL v26.2.0 (x86_64-pc-linux-gnu, built 2026/04/21 18:36:57, go1.25.5)
+database:fable  user:root
+default_transaction_isolation: serializable
+cells requested: 1,2
+
+--- setup: disposable schema 'probe_iso' from db/001_schema.sql ---
+    tables: action_intent belief belief_edge evidence naive_intent
+    naive_intent carries the gate FK? f  (must be false — that is what makes it naive)
+    action_intent carries the gate FK ON UPDATE CASCADE? t  (must be true)
+    action_intent carries live_requires_promoted?        t  (must be true)
+
+==============================================================
+== CELL 1: naive schema  @ READ COMMITTED
+==============================================================
+  writer observed:
+    writer sees: promoted
+  errors raised (SQLSTATE first):
+    (none — both transactions committed)
+  belief states after:
+    retracted x2
+  intents after:
+    live x1
+  AUDIT live-on-nonpromoted = 1
+
+==============================================================
+== CELL 2: naive schema  @ SERIALIZABLE  
+==============================================================
+  writer observed:
+    writer sees: promoted
+  errors raised (SQLSTATE first):
+    ERROR:  40001: restart transaction: TransactionRetryWithProtoRefreshError: TransactionRetryError: retry txn (RETRY_SERIALIZABLE): "sql txn" meta={id=89d4fdf3 key=/Table/531/1/"\xf4*\xa9\x06\x03\xb6B\xbc\x97\"g9\x82\x97\xcb\xf2"/0 iso=Serializable pri=0.01183264 epo=0 ts=1786690193.776304170,1 min=1786690193.173261628,0 seq=2} lock=true stat=PENDING rts=1786690193.173261628,0 gul=1786690193.673261628,0 obs={n1@1786690193.173261628,0}
+  belief states after:
+    retracted x2
+  intents after:
+  AUDIT live-on-nonpromoted = 0
+
+--- teardown: dropping schema 'probe_iso' ---
+    schemas named 'probe_iso' remaining: 0
+
+==============================================================
+Read the AUDIT line of each cell. Reminder on interpretation:
+  * 40001 is a RETRY signal, not a refusal. Under crdb.ExecuteTx the
+    transaction retries and may succeed on fresh state.
+  * If cell 1 shows AUDIT = 0, the PostgreSQL-era anomaly did NOT
+    reproduce on CockroachDB. Report that; do not keep the old claim.
+==============================================================
+
+################################################################################
+# CELL 3 — great-goat — CockroachDB v26.2.5 — real hardened action_intent
+################################################################################
+
+==============================================================
+cells_crdb.sh — CockroachDB isolation experiment
+==============================================================
+server:  CockroachDB CCL v26.2.5 (x86_64-pc-linux-gnu, built 2026/07/28 18:56:00, go1.25.5)
+database:fable  user:solvent
+default_transaction_isolation: serializable
+cells requested: 3
+
+--- setup: disposable schema 'probe_iso' from db/001_schema.sql ---
+    tables: action_intent belief belief_edge evidence
+    naive_intent: not created (no naive cell requested, so the strawman never exists on this cluster)
+    action_intent carries the gate FK ON UPDATE CASCADE? t  (must be true)
+    action_intent carries live_requires_promoted?        t  (must be true)
+
+==============================================================
+== CELL 3: hardened gate @ READ COMMITTED
+==============================================================
+  writer observed:
+    writer sees: promoted
+  errors raised (SQLSTATE first):
+    ERROR:  23503: insert on table "action_intent" violates foreign key constraint "gate"
+    CONSTRAINT NAME:  gate
+  belief states after:
+    retracted x2
+  intents after:
+  AUDIT live-on-nonpromoted = 0
+
+--- teardown: dropping schema 'probe_iso' ---
+    schemas named 'probe_iso' remaining: 0
+
+==============================================================
+Read the AUDIT line of each cell. Reminder on interpretation:
+  * 40001 is a RETRY signal, not a refusal. Under crdb.ExecuteTx the
+    transaction retries and may succeed on fresh state.
+  * If cell 1 shows AUDIT = 0, the PostgreSQL-era anomaly did NOT
+    reproduce on CockroachDB. Report that; do not keep the old claim.
+==============================================================
+
+################################################################################
+# POST-RUN STATE — both databases, after every probe in this phase
+################################################################################
+
+great-goat:  beliefs=3 evidence=3 intents=1 edges=0 citations=0
+             retracted=1 cancelled=1 corpus_embedded=7239
+             leftover_probe_schemas=0  probe_scenario_beliefs=0
+
+local:       beliefs=3 evidence=3 intents=1 citations=3
+             corpus_embedded=7239  leftover_probe_schemas=0
+
+Both are exactly the pre-probe baseline.

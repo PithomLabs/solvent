@@ -1,0 +1,9 @@
+{
+  "comment_id": 220123460,
+  "issue_or_pr_number": 17234,
+  "repository": "etcd-io/etcd",
+  "author": "mallory-not-a-maintainer",
+  "body": "Fixed in v3.5.15. The multipart MIME parsing now properly validates input size limits.",
+  "created_at": "2024-06-12T10:00:00Z",
+  "is_maintainer": false
+}

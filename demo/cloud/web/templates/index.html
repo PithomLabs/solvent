@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solvent</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .container { max-width: 640px; width: 100%; padding: 2rem; text-align: center; }
+    h1 { font-size: 2.5rem; font-weight: 300; letter-spacing: 0.1em; margin-bottom: 0.5rem; color: #fff; }
+    .tagline { font-size: 1rem; color: #888; margin-bottom: 3rem; font-style: italic; }
+    .ledger-box { border: 1px solid #333; border-radius: 8px; padding: 2rem; margin-bottom: 2rem; background: #111; }
+    .ledger-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.15em; color: #666; margin-bottom: 1.5rem; }
+    .counts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-bottom: 2rem; }
+    .count { text-align: center; }
+    .count-num { font-size: 2rem; font-weight: 600; color: #fff; }
+    .count-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: #666; margin-top: 0.25rem; }
+    .btn { display: inline-block; padding: 0.75rem 2rem; border: 1px solid #555; border-radius: 4px; text-decoration: none; color: #fff; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.1em; transition: border-color 0.2s; margin: 0.25rem; }
+    .btn:hover { border-color: #fff; }
+    .btn-primary { background: #fff; color: #0a0a0a; border-color: #fff; }
+    .btn-primary:hover { background: #ddd; border-color: #ddd; }
+    .status { margin-top: 2rem; font-size: 0.75rem; color: #4a4; }
+    .status::before { content: "● "; }
+    footer { margin-top: 3rem; font-size: 0.7rem; color: #444; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>SOLVENT</h1>
+    <p class="tagline">Persistent memory for evidence, authority, and change.</p>
+
+    <div class="ledger-box">
+      <div class="ledger-title">Live Ledger</div>
+      <div class="counts">
+        <div class="count">
+          <div class="count-num">{{.Beliefs}}</div>
+          <div class="count-label">Beliefs</div>
+        </div>
+        <div class="count">
+          <div class="count-num">{{.Evidence}}</div>
+          <div class="count-label">Evidence</div>
+        </div>
+        <div class="count">
+          <div class="count-num">{{.Promoted}}</div>
+          <div class="count-label">Promoted</div>
+        </div>
+        <div class="count">
+          <div class="count-num">{{.Retracted}}</div>
+          <div class="count-label">Retracted</div>
+        </div>
+        <div class="count">
+          <div class="count-num">{{.LiveIntents}}</div>
+          <div class="count-label">Active Intents</div>
+        </div>
+      </div>
+      <a href="/ledger" class="btn btn-primary">Explore the Ledger</a>
+    </div>
+
+    <div class="status">Operational</div>
+
+    <footer>Solvent &mdash; A Transactional Belief Ledger</footer>
+  </div>
+</body>
+</html>

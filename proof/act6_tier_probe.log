@@ -1,0 +1,554 @@
+================================================================================
+proof/act6_tier_probe.log — Act 6 tier probe transcript
+================================================================================
+
+Produced by:  psql "$DSN" -X -f proof/act6_tier_probe.sql
+Runner:       psql (PostgreSQL) 16.14 — NOT `cockroach sql`, which cannot do
+              \set/:VAR interpolation and aborts on the first expected error.
+
+Two runs, in the order they were performed:
+
+  RUN 1  local rehearsal   CockroachDB CCL v26.2.0  (docker solvent-crdb, fable)
+  RUN 2  authoritative     CockroachDB CCL v26.2.5  (great-goat, fable)  <-- the answer
+
+Both ran inside a disposable `probe_act6` schema built from db/001_schema.sql, so
+the four frozen ledger tables were never written to. Each run ends by dropping the
+schema and re-counting the production ledger.
+
+RESULT — identical on both clusters:
+
+  TIER 2  ENFORCED   23514 · live_requires_promoted
+  TIER 1  ENFORCED   23514 · live_requires_promoted
+  TIER 3  moot (no TIER3_MARKER printed — the gate aborted the txn before the
+          assertion could run, so the TIER3 row is not evidence of anything)
+
+  => Act 6 climax = ANCESTOR RETRACTION. The database refuses at the leaf.
+     CockroachDB DOES re-evaluate CHECK constraints on rows modified by
+     ON UPDATE CASCADE.
+
+The cloud DSN, host and credentials are redacted throughout.
+
+
+################################################################################
+# RUN 1 — LOCAL REHEARSAL — CockroachDB v26.2.0
+################################################################################
+
+Pager usage is off.
+Timing is off.
+==============================================================
+=== SECTION 0 — environment facts that gate other decisions ===
+==============================================================
+                                      version                                       
+------------------------------------------------------------------------------------
+ CockroachDB CCL v26.2.0 (x86_64-pc-linux-gnu, built 2026/04/21 18:36:57, go1.25.5)
+(1 row)
+
+ database | user 
+----------+------
+ fable    | root
+(1 row)
+
+ region | primary 
+--------+---------
+(0 rows)
+
+--- isolation, attempt 1: the privileged read (expect 42501 on Cloud Basic) ---
+ sql.txn.read_committed_isolation.enabled 
+------------------------------------------
+ t
+(1 row)
+
+--- isolation, attempt 2: the behavioural probe (needs no privilege) ---
+BEGIN
+ transaction_isolation 
+-----------------------
+ read committed
+(1 row)
+
+ROLLBACK
+ default_transaction_isolation 
+-------------------------------
+ serializable
+(1 row)
+
+--- the gate FK, as production actually has it ---
+      table_name      |                                                    create_statement                                                    
+----------------------+------------------------------------------------------------------------------------------------------------------------
+ public.action_intent | CREATE TABLE public.action_intent (                                                                                   +
+                      |         id UUID NOT NULL DEFAULT gen_random_uuid(),                                                                   +
+                      |         scenario_id UUID NOT NULL,                                                                                    +
+                      |         belief_id UUID NOT NULL,                                                                                      +
+                      |         belief_status STRING NOT NULL DEFAULT 'promoted':::STRING,                                                    +
+                      |         action STRING NOT NULL,                                                                                       +
+                      |         state STRING NOT NULL DEFAULT 'live':::STRING,                                                                +
+                      |         CONSTRAINT action_intent_pkey PRIMARY KEY (id ASC),                                                           +
+                      |         CONSTRAINT gate FOREIGN KEY (belief_id, belief_status) REFERENCES public.belief(id, status) ON UPDATE CASCADE,+
+                      |         INDEX live_intents (belief_id ASC) WHERE state = 'live':::STRING,                                             +
+                      |         CONSTRAINT live_requires_promoted CHECK ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING)),+
+                      |         CONSTRAINT check_state CHECK (state IN ('live':::STRING, 'cancelled':::STRING, 'executed':::STRING))          +
+                      | ) WITH (schema_locked = true);
+(1 row)
+
+==============================================================
+=== SECTION 1 — disposable schema from the frozen DDL       ===
+==============================================================
+DROP SCHEMA
+CREATE SCHEMA
+SET
+CREATE TABLE
+psql:db/001_schema.sql:33: NOTICE:  00000: waiting for job(s) to complete: 1201337273225773057, 1201337273225805825
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4443
+CREATE TABLE
+psql:db/001_schema.sql:34: NOTICE:  00000: waiting for job(s) to complete: 1201337273443024897
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4443
+CREATE INDEX
+psql:db/001_schema.sql:47: NOTICE:  00000: waiting for job(s) to complete: 1201337274459062273, 1201337274459095041
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4443
+CREATE TABLE
+psql:db/001_schema.sql:65: NOTICE:  00000: waiting for job(s) to complete: 1201337274715865089, 1201337274715897857
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4443
+CREATE TABLE
+psql:db/001_schema.sql:66: NOTICE:  00000: waiting for job(s) to complete: 1201337274936852481
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4443
+CREATE INDEX
+ table_schema |  table_name   
+--------------+---------------
+ probe_act6   | action_intent
+ probe_act6   | belief
+ probe_act6   | belief_edge
+ probe_act6   | evidence
+(4 rows)
+
+--- DDL identity: probe_act6.action_intent vs public.action_intent ---
+    verdict    
+---------------
+ DDL_IDENTICAL
+(1 row)
+
+        table_name        |                                                      create_statement                                                      
+--------------------------+----------------------------------------------------------------------------------------------------------------------------
+ probe_act6.action_intent | CREATE TABLE probe_act6.action_intent (                                                                                   +
+                          |         id UUID NOT NULL DEFAULT gen_random_uuid(),                                                                       +
+                          |         scenario_id UUID NOT NULL,                                                                                        +
+                          |         belief_id UUID NOT NULL,                                                                                          +
+                          |         belief_status STRING NOT NULL DEFAULT 'promoted':::STRING,                                                        +
+                          |         action STRING NOT NULL,                                                                                           +
+                          |         state STRING NOT NULL DEFAULT 'live':::STRING,                                                                    +
+                          |         CONSTRAINT action_intent_pkey PRIMARY KEY (id ASC),                                                               +
+                          |         CONSTRAINT gate FOREIGN KEY (belief_id, belief_status) REFERENCES probe_act6.belief(id, status) ON UPDATE CASCADE,+
+                          |         INDEX live_intents (belief_id ASC) WHERE state = 'live':::STRING,                                                 +
+                          |         CONSTRAINT live_requires_promoted CHECK ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING)),    +
+                          |         CONSTRAINT check_state CHECK (state IN ('live':::STRING, 'cancelled':::STRING, 'executed':::STRING))              +
+                          | ) WITH (schema_locked = true);
+(1 row)
+
+--- fixtures: A --derives--> B, both promoted, live intent cites B ---
+INSERT 0 2
+INSERT 0 1
+UPDATE 2
+INSERT 0 1
+                  id                  |  status  
+--------------------------------------+----------
+ 88880000-0000-0000-0000-00000000000a | promoted
+ 88880000-0000-0000-0000-00000000000b | promoted
+(2 rows)
+
+ action | state | belief_status 
+--------+-------+---------------
+ deploy | live  | promoted
+(1 row)
+
+==============================================================
+=== TIER 2 (the floor) — retract the DIRECTLY CITED belief  ===
+=== [MUST ERROR 23514 · live_requires_promoted]             ===
+==============================================================
+BEGIN
+psql:proof/act6_tier_probe.sql:141: ERROR:  23514: failed to satisfy CHECK constraint ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING))
+CONSTRAINT NAME:  live_requires_promoted
+LOCATION:  CheckFailed, errors.go:337
+ROLLBACK
+psql:proof/act6_tier_probe.sql:143: WARNING:  25P01: there is no transaction in progress
+LOCATION:  init, exec_util.go:811
+ROLLBACK
+ tier  |               verdict                
+-------+--------------------------------------
+ TIER2 | ENFORCED (refused, belief unchanged)
+(1 row)
+
+==============================================================
+=== TIER 1 — retract the ANCESTOR                          ===
+=== [MUST ERROR 23514 · live_requires_promoted]             ===
+==============================================================
+BEGIN
+psql:proof/act6_tier_probe.sql:164: ERROR:  23514: failed to satisfy CHECK constraint ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING))
+CONSTRAINT NAME:  live_requires_promoted
+LOCATION:  CheckFailed, errors.go:337
+ROLLBACK
+psql:proof/act6_tier_probe.sql:166: WARNING:  25P01: there is no transaction in progress
+LOCATION:  init, exec_util.go:811
+ROLLBACK
+ tier  |                  verdict                   
+-------+--------------------------------------------
+ TIER1 | ENFORCED (refused, both beliefs unchanged)
+(1 row)
+
+==============================================================
+=== The LEGITIMATE cascade, for comparison  [MUST SUCCEED]  ===
+==============================================================
+BEGIN
+UPDATE 1
+UPDATE 2
+COMMIT
+ action |   state   | belief_status 
+--------+-----------+---------------
+ deploy | cancelled | retracted
+(1 row)
+
+ live_on_nonpromoted 
+---------------------
+                   0
+(1 row)
+
+==============================================================
+=== SECTION 3 — TIER 3 fallback: is an assertion available? ===
+==============================================================
+UPDATE 2
+UPDATE 1
+BEGIN
+psql:proof/act6_tier_probe.sql:231: ERROR:  23514: failed to satisfy CHECK constraint ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING))
+CONSTRAINT NAME:  live_requires_promoted
+LOCATION:  CheckFailed, errors.go:337
+psql:proof/act6_tier_probe.sql:232: ERROR:  25P02: current transaction is aborted, commands ignored until end of transaction block
+LOCATION:  NewTransactionAbortedError, errors.go:92
+psql:proof/act6_tier_probe.sql:240: ERROR:  25P02: current transaction is aborted, commands ignored until end of transaction block
+LOCATION:  NewTransactionAbortedError, errors.go:92
+ROLLBACK
+psql:proof/act6_tier_probe.sql:242: WARNING:  25P01: there is no transaction in progress
+LOCATION:  init, exec_util.go:811
+ROLLBACK
+ tier  |                                              verdict                                               
+-------+----------------------------------------------------------------------------------------------------
+ TIER3 | transaction aborted, belief unchanged — check for TIER3_MARKER above to see WHICH mechanism did it
+(1 row)
+
+==============================================================
+=== SECTION 4 — teardown and baseline re-verify             ===
+==============================================================
+SET
+psql:proof/act6_tier_probe.sql:255: NOTICE:  00000: waiting for job(s) to complete: 1201337276287385601
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4443
+DROP SCHEMA
+         check          | value 
+------------------------+-------
+ probe_schema_remaining | 0
+(1 row)
+
+          metric           | value 
+---------------------------+-------
+ beliefs                   | 3
+ evidence                  | 3
+ intents                   | 1
+ edges                     | 0
+ retracted                 | 1
+ cancelled                 | 1
+ audit_live_on_nonpromoted | 0
+(7 rows)
+
+      table_name      |                                                    create_statement                                                    
+----------------------+------------------------------------------------------------------------------------------------------------------------
+ public.action_intent | CREATE TABLE public.action_intent (                                                                                   +
+                      |         id UUID NOT NULL DEFAULT gen_random_uuid(),                                                                   +
+                      |         scenario_id UUID NOT NULL,                                                                                    +
+                      |         belief_id UUID NOT NULL,                                                                                      +
+                      |         belief_status STRING NOT NULL DEFAULT 'promoted':::STRING,                                                    +
+                      |         action STRING NOT NULL,                                                                                       +
+                      |         state STRING NOT NULL DEFAULT 'live':::STRING,                                                                +
+                      |         CONSTRAINT action_intent_pkey PRIMARY KEY (id ASC),                                                           +
+                      |         CONSTRAINT gate FOREIGN KEY (belief_id, belief_status) REFERENCES public.belief(id, status) ON UPDATE CASCADE,+
+                      |         INDEX live_intents (belief_id ASC) WHERE state = 'live':::STRING,                                             +
+                      |         CONSTRAINT live_requires_promoted CHECK ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING)),+
+                      |         CONSTRAINT check_state CHECK (state IN ('live':::STRING, 'cancelled':::STRING, 'executed':::STRING))          +
+                      | ) WITH (schema_locked = true);
+(1 row)
+
+==============================================================
+=== VERDICT (read the TIER rows above)                      ===
+===   TIER1 ENFORCED -> Act 6 climax = ancestor retraction, ===
+===     DB refuses at the leaf.                             ===
+===   TIER1 NOT / TIER2 ENFORCED -> climax = retract the    ===
+===     cited belief. Drop the ancestor framing from the    ===
+===     video; do not narrate a graph cascade.              ===
+===   BOTH NOT ENFORCED -> Tier 3. CockroachDB is not       ===
+===     re-evaluating CHECKs on cascade-modified rows.      ===
+===     Do NOT fake the refusal. Act 6 becomes the          ===
+===     insert-time gate FK (23503) plus an explicit        ===
+===     in-transaction assertion, and the README says so.   ===
+==============================================================
+
+################################################################################
+# RUN 2 — AUTHORITATIVE — great-goat, CockroachDB v26.2.5
+################################################################################
+
+Pager usage is off.
+Timing is off.
+==============================================================
+=== SECTION 0 — environment facts that gate other decisions ===
+==============================================================
+                                      version                                       
+------------------------------------------------------------------------------------
+ CockroachDB CCL v26.2.5 (x86_64-pc-linux-gnu, built 2026/07/28 18:56:00, go1.25.5)
+(1 row)
+
+ database |  user   
+----------+---------
+ fable    | solvent
+(1 row)
+
+    region     | primary 
+---------------+---------
+ aws-us-east-1 | f
+ aws-us-west-2 | t
+ aws-us-east-2 | f
+(3 rows)
+
+--- isolation, attempt 1: the privileged read (expect 42501 on Cloud Basic) ---
+psql:proof/act6_tier_probe.sql:78: ERROR:  42501: only users with MODIFYCLUSTERSETTING or VIEWCLUSTERSETTING privileges are allowed to show cluster setting 'sql.txn.read_committed_isolation.enabled'
+LOCATION:  checkPrivilegesForSetting, set_cluster_setting.go:115
+--- isolation, attempt 2: the behavioural probe (needs no privilege) ---
+BEGIN
+ transaction_isolation 
+-----------------------
+ read committed
+(1 row)
+
+ROLLBACK
+ default_transaction_isolation 
+-------------------------------
+ serializable
+(1 row)
+
+--- the gate FK, as production actually has it ---
+      table_name      |                                                    create_statement                                                    
+----------------------+------------------------------------------------------------------------------------------------------------------------
+ public.action_intent | CREATE TABLE public.action_intent (                                                                                   +
+                      |         id UUID NOT NULL DEFAULT gen_random_uuid(),                                                                   +
+                      |         scenario_id UUID NOT NULL,                                                                                    +
+                      |         belief_id UUID NOT NULL,                                                                                      +
+                      |         belief_status STRING NOT NULL DEFAULT 'promoted':::STRING,                                                    +
+                      |         action STRING NOT NULL,                                                                                       +
+                      |         state STRING NOT NULL DEFAULT 'live':::STRING,                                                                +
+                      |         CONSTRAINT action_intent_pkey PRIMARY KEY (id ASC),                                                           +
+                      |         CONSTRAINT gate FOREIGN KEY (belief_id, belief_status) REFERENCES public.belief(id, status) ON UPDATE CASCADE,+
+                      |         INDEX live_intents (belief_id ASC) WHERE state = 'live':::STRING,                                             +
+                      |         CONSTRAINT live_requires_promoted CHECK ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING)),+
+                      |         CONSTRAINT check_state CHECK (state IN ('live':::STRING, 'cancelled':::STRING, 'executed':::STRING))          +
+                      | ) WITH (schema_locked = true) LOCALITY REGIONAL BY TABLE IN PRIMARY REGION;
+(1 row)
+
+==============================================================
+=== SECTION 1 — disposable schema from the frozen DDL       ===
+==============================================================
+DROP SCHEMA
+CREATE SCHEMA
+SET
+CREATE TABLE
+psql:db/001_schema.sql:33: NOTICE:  00000: waiting for job(s) to complete: 1201337505580154883, 1201337505580187651
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4471
+CREATE TABLE
+psql:db/001_schema.sql:34: NOTICE:  00000: waiting for job(s) to complete: 1201337567346589699
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4471
+CREATE INDEX
+psql:db/001_schema.sql:47: NOTICE:  00000: waiting for job(s) to complete: 1201337772933906435, 1201337772933939203
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4471
+CREATE TABLE
+psql:db/001_schema.sql:65: NOTICE:  00000: waiting for job(s) to complete: 1201337839007105027, 1201337839007137795
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4471
+CREATE TABLE
+psql:db/001_schema.sql:66: NOTICE:  00000: waiting for job(s) to complete: 1201337900537348099
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4471
+CREATE INDEX
+ table_schema |  table_name   
+--------------+---------------
+ probe_act6   | action_intent
+ probe_act6   | belief
+ probe_act6   | belief_edge
+ probe_act6   | evidence
+(4 rows)
+
+--- DDL identity: probe_act6.action_intent vs public.action_intent ---
+    verdict    
+---------------
+ DDL_IDENTICAL
+(1 row)
+
+        table_name        |                                                      create_statement                                                      
+--------------------------+----------------------------------------------------------------------------------------------------------------------------
+ probe_act6.action_intent | CREATE TABLE probe_act6.action_intent (                                                                                   +
+                          |         id UUID NOT NULL DEFAULT gen_random_uuid(),                                                                       +
+                          |         scenario_id UUID NOT NULL,                                                                                        +
+                          |         belief_id UUID NOT NULL,                                                                                          +
+                          |         belief_status STRING NOT NULL DEFAULT 'promoted':::STRING,                                                        +
+                          |         action STRING NOT NULL,                                                                                           +
+                          |         state STRING NOT NULL DEFAULT 'live':::STRING,                                                                    +
+                          |         CONSTRAINT action_intent_pkey PRIMARY KEY (id ASC),                                                               +
+                          |         CONSTRAINT gate FOREIGN KEY (belief_id, belief_status) REFERENCES probe_act6.belief(id, status) ON UPDATE CASCADE,+
+                          |         INDEX live_intents (belief_id ASC) WHERE state = 'live':::STRING,                                                 +
+                          |         CONSTRAINT live_requires_promoted CHECK ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING)),    +
+                          |         CONSTRAINT check_state CHECK (state IN ('live':::STRING, 'cancelled':::STRING, 'executed':::STRING))              +
+                          | ) WITH (schema_locked = true) LOCALITY REGIONAL BY TABLE IN PRIMARY REGION;
+(1 row)
+
+--- fixtures: A --derives--> B, both promoted, live intent cites B ---
+INSERT 0 2
+INSERT 0 1
+UPDATE 2
+INSERT 0 1
+                  id                  |  status  
+--------------------------------------+----------
+ 88880000-0000-0000-0000-00000000000a | promoted
+ 88880000-0000-0000-0000-00000000000b | promoted
+(2 rows)
+
+ action | state | belief_status 
+--------+-------+---------------
+ deploy | live  | promoted
+(1 row)
+
+==============================================================
+=== TIER 2 (the floor) — retract the DIRECTLY CITED belief  ===
+=== [MUST ERROR 23514 · live_requires_promoted]             ===
+==============================================================
+BEGIN
+psql:proof/act6_tier_probe.sql:141: ERROR:  23514: failed to satisfy CHECK constraint ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING))
+CONSTRAINT NAME:  live_requires_promoted
+LOCATION:  CheckFailed, errors.go:337
+ROLLBACK
+psql:proof/act6_tier_probe.sql:143: WARNING:  25P01: there is no transaction in progress
+LOCATION:  init, exec_util.go:811
+ROLLBACK
+ tier  |               verdict                
+-------+--------------------------------------
+ TIER2 | ENFORCED (refused, belief unchanged)
+(1 row)
+
+==============================================================
+=== TIER 1 — retract the ANCESTOR                          ===
+=== [MUST ERROR 23514 · live_requires_promoted]             ===
+==============================================================
+BEGIN
+psql:proof/act6_tier_probe.sql:164: ERROR:  23514: failed to satisfy CHECK constraint ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING))
+CONSTRAINT NAME:  live_requires_promoted
+LOCATION:  CheckFailed, errors.go:337
+ROLLBACK
+psql:proof/act6_tier_probe.sql:166: WARNING:  25P01: there is no transaction in progress
+LOCATION:  init, exec_util.go:811
+ROLLBACK
+ tier  |                  verdict                   
+-------+--------------------------------------------
+ TIER1 | ENFORCED (refused, both beliefs unchanged)
+(1 row)
+
+==============================================================
+=== The LEGITIMATE cascade, for comparison  [MUST SUCCEED]  ===
+==============================================================
+BEGIN
+UPDATE 1
+UPDATE 2
+COMMIT
+ action |   state   | belief_status 
+--------+-----------+---------------
+ deploy | cancelled | retracted
+(1 row)
+
+ live_on_nonpromoted 
+---------------------
+                   0
+(1 row)
+
+==============================================================
+=== SECTION 3 — TIER 3 fallback: is an assertion available? ===
+==============================================================
+UPDATE 2
+UPDATE 1
+BEGIN
+psql:proof/act6_tier_probe.sql:231: ERROR:  23514: failed to satisfy CHECK constraint ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING))
+CONSTRAINT NAME:  live_requires_promoted
+LOCATION:  CheckFailed, errors.go:337
+psql:proof/act6_tier_probe.sql:232: ERROR:  25P02: current transaction is aborted, commands ignored until end of transaction block
+LOCATION:  NewTransactionAbortedError, errors.go:92
+psql:proof/act6_tier_probe.sql:240: ERROR:  25P02: current transaction is aborted, commands ignored until end of transaction block
+LOCATION:  NewTransactionAbortedError, errors.go:92
+ROLLBACK
+psql:proof/act6_tier_probe.sql:242: WARNING:  25P01: there is no transaction in progress
+LOCATION:  init, exec_util.go:811
+ROLLBACK
+ tier  |                                              verdict                                               
+-------+----------------------------------------------------------------------------------------------------
+ TIER3 | transaction aborted, belief unchanged — check for TIER3_MARKER above to see WHICH mechanism did it
+(1 row)
+
+==============================================================
+=== SECTION 4 — teardown and baseline re-verify             ===
+==============================================================
+SET
+psql:proof/act6_tier_probe.sql:255: NOTICE:  00000: waiting for job(s) to complete: 1201338168870862851
+If the statement is canceled, jobs will continue in the background.
+LOCATION:  func1, conn_executor.go:4471
+DROP SCHEMA
+         check          | value 
+------------------------+-------
+ probe_schema_remaining | 0
+(1 row)
+
+          metric           | value 
+---------------------------+-------
+ beliefs                   | 3
+ evidence                  | 3
+ intents                   | 1
+ edges                     | 0
+ retracted                 | 1
+ cancelled                 | 1
+ audit_live_on_nonpromoted | 0
+(7 rows)
+
+      table_name      |                                                    create_statement                                                    
+----------------------+------------------------------------------------------------------------------------------------------------------------
+ public.action_intent | CREATE TABLE public.action_intent (                                                                                   +
+                      |         id UUID NOT NULL DEFAULT gen_random_uuid(),                                                                   +
+                      |         scenario_id UUID NOT NULL,                                                                                    +
+                      |         belief_id UUID NOT NULL,                                                                                      +
+                      |         belief_status STRING NOT NULL DEFAULT 'promoted':::STRING,                                                    +
+                      |         action STRING NOT NULL,                                                                                       +
+                      |         state STRING NOT NULL DEFAULT 'live':::STRING,                                                                +
+                      |         CONSTRAINT action_intent_pkey PRIMARY KEY (id ASC),                                                           +
+                      |         CONSTRAINT gate FOREIGN KEY (belief_id, belief_status) REFERENCES public.belief(id, status) ON UPDATE CASCADE,+
+                      |         INDEX live_intents (belief_id ASC) WHERE state = 'live':::STRING,                                             +
+                      |         CONSTRAINT live_requires_promoted CHECK ((state != 'live':::STRING) OR (belief_status = 'promoted':::STRING)),+
+                      |         CONSTRAINT check_state CHECK (state IN ('live':::STRING, 'cancelled':::STRING, 'executed':::STRING))          +
+                      | ) WITH (schema_locked = true) LOCALITY REGIONAL BY TABLE IN PRIMARY REGION;
+(1 row)
+
+==============================================================
+=== VERDICT (read the TIER rows above)                      ===
+===   TIER1 ENFORCED -> Act 6 climax = ancestor retraction, ===
+===     DB refuses at the leaf.                             ===
+===   TIER1 NOT / TIER2 ENFORCED -> climax = retract the    ===
+===     cited belief. Drop the ancestor framing from the    ===
+===     video; do not narrate a graph cascade.              ===
+===   BOTH NOT ENFORCED -> Tier 3. CockroachDB is not       ===
+===     re-evaluating CHECKs on cascade-modified rows.      ===
+===     Do NOT fake the refusal. Act 6 becomes the          ===
+===     insert-time gate FK (23503) plus an explicit        ===
+===     in-transaction assertion, and the README says so.   ===
+==============================================================

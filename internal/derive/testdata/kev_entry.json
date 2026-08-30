@@ -1,0 +1,10 @@
+{
+  "cveID": "CVE-2024-24790",
+  "vendor": "etcd",
+  "product": "etcd",
+  "versionAffected": "v3.4.x, v3.5.x before v3.5.15",
+  "versionFixed": "v3.5.15",
+  "dateAdded": "2024-06-05",
+  "shortDescription": "etcd is vulnerable to denial of service via multipart MIME parsing",
+  "reference": "https://nvd.nist.gov/vuln/detail/CVE-2024-24790"
+}

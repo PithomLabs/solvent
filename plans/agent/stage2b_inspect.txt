@@ -1,0 +1,63 @@
+task: [inspect] bash scripts/demo/inspect.sh
+=== SOLVENT LEDGER ===
+
+--- BELIEFS ---
+  ID:         de4aae7f-785b-4782-a376-801661af6fcb
+  Scenario:   00000000-0000-0000-0000-000000000001
+  Type:       postulated
+  Status:     retracted
+  Claim:      etcd v3.5.0 is approved for production deployment (decision as of 2021-06-16)
+  Debt:       {}
+
+  ID:         cbd20f26-6e37-44aa-8bb2-fa48cad18fb4
+  Scenario:   00000000-0000-0000-0000-000000000001
+  Type:       accommodated
+  Status:     entered
+  Claim:      fix available for etcd-io/etcd v3.5.27
+  Debt:       {needToyCheck,needNullModel,needObstruction,needFaithfulnessReview}
+
+  ID:         86da96c0-b2f7-47ed-bc5f-5e3f49149b86
+  Scenario:   00000000-0000-0000-0000-000000000001
+  Type:       accommodated
+  Status:     entered
+  Claim:      fix available for etcd-io/etcd v3.5.28
+  Debt:       {needToyCheck,needNullModel,needObstruction,needFaithfulnessReview}
+
+  ID:         51fb32e2-86dd-4396-aa7b-6f4438859637
+  Scenario:   00000000-0000-0000-0000-000000000001
+  Type:       derived
+  Status:     entered
+  Claim:      go/go.etcd.io/etcd/v3 >=3.5.0, <3.5.28 is vulnerable to GHSA-q8m4-xhhv-38mg
+  Debt:       {needInvariant,needToyCheck,needNullModel,needObstruction,needFaithfulnessReview}
+
+--- EVIDENCE ---
+  ID:         4f0060e8-7f04-44be-84df-7616c62b5723
+  Belief:     51fb32e2-86dd-4396-aa7b-6f4438859637
+  Class:      external_feed
+  URL:        https://github.com/advisories/GHSA-q8m4-xhhv-38mg
+
+  ID:         ef585711-dfb4-454f-8f56-856b510da96c
+  Belief:     86da96c0-b2f7-47ed-bc5f-5e3f49149b86
+  Class:      external_feed
+  URL:        https://github.com/etcd-io/etcd/releases/tag/v3.5.28
+
+  ID:         645fa4e4-bf20-495d-b33b-597efed99602
+  Belief:     cbd20f26-6e37-44aa-8bb2-fa48cad18fb4
+  Class:      external_feed
+  URL:        https://github.com/etcd-io/etcd/releases/tag/v3.5.27
+
+  ID:         79670456-2f27-485d-862e-0ca3bf9f0682
+  Belief:     de4aae7f-785b-4782-a376-801661af6fcb
+  Class:      external_feed
+  URL:        https://github.com/etcd-io/etcd/releases/tag/v3.5.0
+
+--- INTENTS ---
+  ID:         ad7244a9-841b-4322-8d78-0056e9ad7a6b
+  Belief:     de4aae7f-785b-4782-a376-801661af6fcb
+  Action:     deploy etcd v3.5.0
+  State:      cancelled
+
+--- AUDIT ---
+  Live intents on non-promoted beliefs: 0 (SAFE)
+
+=== END LEDGER ===
