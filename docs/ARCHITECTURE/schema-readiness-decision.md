@@ -106,10 +106,10 @@ all other decisions): the Solvent service is inside the MVP trusted computing ba
 |---|---|---|---|
 | **CockroachDB** | In TCB | Transactional consistency; making impossible durable states impossible (`promoted_is_debt_free`, `gate`, `live_requires_promoted` — `db/001_schema.sql:30,69,74`) | Interpretation, semantics, identity |
 | **Kernel (Go, `crdb.ExecuteTx`)** | In TCB | State transitions, atomicity, serialization of writes (`kernel/kernel.go:54-169`) | Policy, identity, semantic relevance |
-| **Solvent service** | **In TCB (MVP decision, D2)** | Interpretation, set-level logic, tuple verification (I-12, DOCUMENTED CONTRACT), policy binding, ingress verification | — (it is trusted; that is what TCB means) |
+| **Solvent service** | **In TCB (MVP decision, D2)** | Interpretation, set-level logic, authorization-target matching (proposed property; source spec label I-12), policy binding, ingress verification | — (it is trusted; that is what TCB means) |
 | **Identity (IdP)** | Out of TCB, trusted for authenticity | Asserting that a principal is who it claims to be | Authorization decisions, Solvent's ledger semantics |
 | **Policy authors (tenant)** | Out of TCB | Choosing obligations within Solvent's floor | Exceeding the floor (the floor is Solvent's, not the tenant's) |
-| **Executor** | Out of TCB | Faithful presentation of the authorized tuple (I-12 contract); execution effect (I-13, DOCUMENTED CONTRACT, deferred) | Authorization decisions |
+| **Executor** | Out of TCB | Faithful presentation of the authorized tuple (Executor Mediation, DOCUMENTED CONTRACT); execution effect (FUTURE/UNSCOPED) | Authorization decisions |
 | **Evidence sources** | Out of TCB until ingressed | Content of the external world | — (Solvent proves provenance/integrity of what it received, not world truth — D12) |
 
 **What this means, stated plainly:**
@@ -126,8 +126,8 @@ all other decisions): the Solvent service is inside the MVP trusted computing ba
    debt, or a live intent on a non-promoted belief (`db/001_schema.sql:30,69`).
 2. Identity verification — authenticity comes from the IdP, not from service judgement.
 3. Executor contract — the executor re-presents and the service re-verifies the tuple
-   immediately before execution (I-12, DOCUMENTED CONTRACT), so a stale service decision
-   cannot silently survive retraction.
+   immediately before execution (proposed authorization-target matching property; source
+   spec label I-12), so a stale service decision cannot silently survive retraction.
 
 ---
 
@@ -145,10 +145,10 @@ all other decisions): the Solvent service is inside the MVP trusted computing ba
 | D8 | Obligation identity = (key, version, type, policy context); `debt[]` strings are transitional | PROPOSED | Service + DB | Discharge records bound to stable obligation identity | Ledger rows name obligation identity; versioned keys promoted with policy versioning |
 | D9 | Transitional dual truth (`debt[]` + discharge ledger) accepted iff single-transaction atomicity holds; long-term obligation rows → discharge rows → derived debt | PROPOSED (atomicity rule locked here) | Kernel + DB | Accepted discharge and debt-array removal are one transaction, neither surviving without the other | Discharge ledger append-only; duplicate discharge impossible; revocation = counter-entry, never deletion |
 | D10 | Policy versions append-only; cross-row monotonicity is transactional enforcement, not a row-local CHECK; downgrade may restrict, never broaden | PROPOSED (invariant locked here) | Kernel + Service + DB | Policy version identity + binding at approval | `current_authority ≤ approval_time_authority`; version hash bound into approval snapshot |
-| D11 | Universal policy floor (I-P1/I-P2 prohibitions, DOCUMENTED CONTRACT); `HIGH_IMPACT ⇒ ≥1 attested\|quorum` (I-P3, DOCUMENTED CONTRACT) remains candidate | DOCUMENTED CONTRACT; CURRENT ENFORCEMENT = NOT IMPLEMENTED; I-P3 OPEN | Service | Policy validation refusals | Schema design must not assume any floor is enforced until it is |
+| D11 | Universal policy floor (I-P1/I-P2 prohibitions, DOCUMENTED CONTRACT); `HIGH_IMPACT ⇒ ≥1 attested\|quorum` candidate | DOCUMENTED CONTRACT (floor) + OPEN/CANDIDATE (HIGH_IMPACT floor, no invariant identity); CURRENT ENFORCEMENT = NOT IMPLEMENTED | Service | Policy validation refusals | Schema design must not assume any floor is enforced until it is |
 | D12 | `server_verified` is a persisted fact asserted by a named trusted process (service ingress), never a caller-settable Boolean | PROPOSED | Service (in TCB) | Ingress-computed hash verification | Verification result persisted by the ingress code path only |
 | D13 | Target ≠ AuthorizationDecision ≠ Warrant; MVP embodies the decision in target activation; no warrant or decision table | PROPOSED | Service | Activation state + snapshot as the authoritative assertion | No third/fourth table in MVP; warrant is a portable reference only |
-| D14 | I-12 (authorized tuple == presented tuple) preserved and verified before every HIGH_IMPACT execution; I-13 (world effect) deferred | I-12 PROPOSED (contract DOCUMENTED); I-13 DEFERRED | Service + Executor | Pre-execution re-verification | Schema must not claim execution proof; `executed` is caller-asserted today |
+| D14 | Authorization-target matching (authorized tuple == presented tuple, source spec label I-12) preserved and verified before every HIGH_IMPACT execution; execution-effect verification (source spec label I-13) FUTURE/UNSCOPED | Matching property PROPOSED (source spec label I-12); execution-effect verification FUTURE/UNSCOPED | Service + Executor | Pre-execution re-verification | Schema must not claim execution proof; `executed` is caller-asserted today |
 | D15 | Lean proves only properties with real executable semantics; no Lean changes now | PROPOSED (discipline locked here) | Lean | — | Future theorems only after corresponding SQL constraints exist |
 | D16 | Derive schema from durable facts, never from table names | PROPOSED (method locked here) | All | — | Candidate schema below is an output, revisable by the analysis |
 
@@ -484,9 +484,10 @@ quorum cannot count duplicate             NOT IMPLEMENTED
   as independent sources (I-P2)
 ```
 
-The stronger candidate posture — `HIGH_IMPACT ⇒ ≥1 attested or quorum` (I-P3, DOCUMENTED
-CONTRACT) — remains **OPEN**: there is no concrete customer or use-case evidence for it yet,
-and this document does not manufacture any.
+The stronger candidate posture — `HIGH_IMPACT ⇒ ≥1 attested or quorum` — remains
+**OPEN / CANDIDATE**: there is no concrete customer or use-case evidence for it yet, and this
+document does not manufacture any. It carries no invariant identifier: OPEN items do not earn
+IDs, and the label `I-P3` in the source spec must not be mistaken for an earned invariant.
 
 The discipline Review #7 demanded is adopted: prose distinguishes **DOCUMENTED CONTRACT**
 from **CURRENT ENFORCEMENT**. A coherent design is not evidence of enforcement.
@@ -547,18 +548,27 @@ Warrant                 = portable reference to that decision ("go check, don't 
 
 ## Execution Boundary Decision
 
-**Decision (D14).** I-12 and I-13 are DOCUMENTED CONTRACT
-(authority-target-and-debt-discharge-spec.md, Revision 1):
+**Decision (D14).** The source specification labels two authorization/execution properties
+`I-12` and `I-13` (authority-target-and-debt-discharge-spec.md, Revision 1). Those strings
+are the source spec's labels only — under the earned-IDs discipline, neither is an earned
+invariant here. This document adopts them as:
 
 ```text
-I-12 AuthorizationTargetMatch   PROPOSED (contract DOCUMENTED; CURRENT: NONE)
+Authorization-target matching (source spec label I-12)
+  Status: PROPOSED. CURRENT: NONE.
   Solvent verifies: authorized tuple == presented tuple, by exact equality,
   server-side, before every HIGH_IMPACT execution. `unavailable` is a distinct,
   typed outcome from `DENY` (fail closed per ADR Decision 2, :113).
 
-I-13 ExecutionEffectMatch       DEFERRED
+Execution-effect verification (source spec label I-13)
+  Status: FUTURE / UNSCOPED.
   presented tuple == actual world effect. Requires trusted-executor receipts;
   out of scope. The schema design must NOT accidentally claim execution proof.
+
+Executor Mediation — DOCUMENTED CONTRACT and deployment/integration precondition,
+not a kernel invariant:
+  A consequential action governed by Solvent must not have an unmediated
+  execution path around the authorized executor.
 ```
 
 **CURRENT/VERIFIED:** `action_intent.state='executed'` is a caller-asserted string
@@ -645,7 +655,7 @@ condition is the contract: when it fires, the concept returns to design.
 | AuthorizationDecision table | D13: activation state + immutable snapshot *is* the decision in MVP | Decisions must outlive targets, be revoked independently, or be composed (delegation, attenuation) |
 | Tenant table + tenant auth + RLS | D3: the invariant is locked and columns are reserved; the deployment is single-tenant today | First multi-tenant deployment; tenant authentication exists |
 | EvidenceArtifact / Citation objects | D12: current `evidence` rows carry content, provenance, and citation roles adequately for MVP | One artifact must be cited by many beliefs/discharges with independent lifecycle (replay-scope control, artifact revocation) |
-| ExecutionReceipt (I-13) | D14: execution-effect proof requires a trusted executor and receipts; explicitly out of scope | A trusted executor integration with signed post-execution receipts exists |
+| ExecutionReceipt | D14: execution-effect proof requires a trusted executor and receipts; explicitly out of scope (FUTURE/UNSCOPED) | A trusted executor integration with signed post-execution receipts exists |
 
 Also outside this boundary (FUTURE/UNSCOPED, recorded honestly — deferred, not solved):
 temporal authority / validity horizons (`docs/ADR/0001-authority-and-attestation.md:543`
@@ -672,8 +682,9 @@ or DOCUMENTED CONTRACT, unimplemented); "—" = not that layer's responsibility.
 | Tenant consistency | No cross-tenant authority relationship | Composite keys (future, D3) | — | — | Binds tenant in assertion | — | — | — |
 | Policy downgrade monotonicity | `current_authority ≤ approval_time_authority` | Append-only versions (future) | Transactional ordering | Verify at verification time | — | Owns the rules | — | Future candidate |
 | Discharge uniqueness | One discharge per (belief, obligation); no half-discharge | Ledger uniqueness (future) | Single-tx rule (D9) | — | — | — | — | Future candidate |
-| I-12 (DOCUMENTED CONTRACT) | authorized tuple == presented tuple | — | — | Verify before every HIGH_IMPACT execution | — | — | Present tuple exactly; re-present | — |
-| I-13 (DOCUMENTED CONTRACT) | world effect == authorized consequence | — | — | — | — | — | Trusted executor receipts | — |
+| Authorization-target matching (proposed property; source spec label I-12) | authorized tuple == presented tuple | — | — | Verify before every HIGH_IMPACT execution | — | — | Present tuple exactly; re-present | — |
+| Execution-effect verification (FUTURE/UNSCOPED) | world effect == authorized consequence | — | — | — | — | — | Trusted executor receipts | — |
+| Executor Mediation (DOCUMENTED CONTRACT, deployment/integration precondition — not a kernel invariant) | No unmediated execution path around the authorized executor for a Solvent-governed consequential action | — | — | — | — | — | Honor the mediation contract | — |
 
 ---
 
@@ -697,7 +708,7 @@ Semantic requirements only; final mechanisms belong to schema design (D7).
    execution and is never cached.
 6. **Execute vs Retraction:** the executor's present → verify → execute sequence
    re-verifies immediately before execution; the residual gap between verify and execute is
-   what deferred I-13 receipts would close (recorded, not hidden).
+   what deferred execution-effect receipts would close (recorded, not hidden).
 
 ---
 
@@ -736,7 +747,8 @@ Reassess`, `docs/FOUR_VERB.md`, `scripts/demo/four_verb.sh`): the four-role sepa
 authorized) → refusal; revoked principal → approval refused.
 
 **What DocTrust cannot prove:** domain-agnostic generality (single document domain);
-semantic relevance of justifications; I-13 execution effect; multi-tenant isolation (it is
+semantic relevance of justifications; execution-effect verification (FUTURE/UNSCOPED);
+multi-tenant isolation (it is
 single-tenant); that the C-1 model is production-ready. DocTrust is Reference
 Implementation #1, not proof of correctness (ADR Decision 8,
 `docs/ADR/0001-authority-and-attestation.md:313`).
@@ -785,7 +797,7 @@ successful transition per snapshot; loser fails closed into review. The
 **6. Belief retract → old justification → stale warrant.** Stopped by D5 + Concurrency Rule
 5: justification validity is re-read at every pre-execution verification, never cached; the
 `gate` pattern is the precedent for schema-detonated invalid states. The verify→execute
-residual is I-13's recorded deferral.
+residual is the recorded deferral of execution-effect verification.
 
 ---
 
@@ -800,7 +812,7 @@ residual is I-13's recorded deferral.
 | MCP captures no principal identity; scenarios are a fixed local map | `cmd/solvent-mcp/tools.go:104-121`, `cmd/solvent-mcp/main.go:31-34` | High | Principal object (D1) | Discharged (as current state) |
 | No principal / authority_target / justification / debt_discharge / policy_version / tenant_id exists in db/ or Go | `db/001_schema.sql` (all), `db/002_corpus.sql:25,76`, `db/003_wizard.sql:50`, repo grep | High | This is the gap this artifact gates | Discharged |
 | `content_sha256` is caller-supplied pass-through | `kernel/kernel.go:73` | High | Ingress verification (D12; I-11 deferred) | Discharged (as current state) |
-| `executed` intent state is caller-asserted, not proof | `db/001_schema.sql:66` | High | I-13 deferred (D14) | Discharged (as current state) |
+| `executed` intent state is caller-asserted, not proof | `db/001_schema.sql:66` | High | Execution-effect verification deferred (D14) | Discharged (as current state) |
 | I-P1/I-P2 floor: DOCUMENTED CONTRACT, CURRENT ENFORCEMENT = NOT IMPLEMENTED | No policy validation code exists; both `docs/ARCHITECTURE/` specs are PROPOSED — NOT IMPLEMENTED | High | Policy validation implementation | Discharged (wording corrected) |
 | Lean covers the four current transitions only | `formal/lean/Solvent/Preservation.lean`, `Invariants.lean`, `Examples.lean` | High | Future theorems gated on SQL (D15) | Discharged |
 | Four-verb slice is legible and exercised | `docs/FOUR_VERB.md`, `scripts/demo/four_verb.sh` | High | — | Discharged |
@@ -836,7 +848,8 @@ after it:
    AttachJustification needs durable per-link state.
 
 Explicitly **not** open (FUTURE/UNSCOPED, with promotion conditions in §Deferred Concepts):
-temporal authority, I-13 receipts, A2A, authority composition/consequence-chain analysis,
+temporal authority, execution-effect receipts, A2A, authority composition/consequence-chain
+analysis,
 credential storage, tenant implementation. None of these block schema design; none is claimed
 solved.
 
@@ -862,12 +875,18 @@ The schema-design phase must honor, at minimum:
 8. Discharge and promotion are transactionally coherent — the single-tx rule (D9).
 9. Policy downgrade cannot broaden existing authority (D10).
 10. An agent cannot approve HIGH_IMPACT (I-A4, DOCUMENTED CONTRACT; D1 makes it relational).
-11. I-12 ≠ I-13; the schema claims no execution proof (D14).
+11. Authorization-target matching ≠ execution-effect verification; the schema claims no
+    execution proof (D14).
 12. NULL/missing authority dimensions never mean wildcard (Migration Rules).
-13. Capability containment is a core property of tuple + snapshot design.
-14. Authority composition / consequence-chain analysis remains a future capability — the
+13. Capability containment is a cross-system security principle; the schema must not
+    undermine explicit authority boundaries, but containment itself is not a
+    kernel-guaranteed invariant.
+14. Executor Mediation (DOCUMENTED CONTRACT, deployment/integration precondition — not a
+    kernel invariant): a consequential action governed by Solvent must not have an
+    unmediated execution path around the authorized executor.
+15. Authority composition / consequence-chain analysis remains a future capability — the
     schema must not foreclose it but must not build it.
-15. Reassessment may restrict, revoke, or quarantine — never silently broaden (D10/D14).
+16. Reassessment may restrict, revoke, or quarantine — never silently broaden (D10/D14).
 
 And the standing discipline: every CURRENT/VERIFIED claim cites repository truth; invariant
 IDs are earned, not assigned; every future claim is PROPOSED / FUTURE-UNSCOPED / OPEN /
