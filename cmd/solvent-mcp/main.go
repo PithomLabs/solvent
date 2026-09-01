@@ -246,6 +246,251 @@ func main() {
 		},
 	}, toolHandler("solvent_explain"))
 
+	// --- Authority lifecycle tools ---
+
+	server.AddTool(&mcp.Tool{
+		Name:        "solvent_create_principal",
+		Description: "Create a new principal (identity record). Returns the principal_id. MCP principal-ID fields are attribution inputs, not authentication proof — the v0 MCP server must be deployed as a trusted administrative surface.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"principal_type": map[string]any{
+					"type":        "string",
+					"description": "Principal type (e.g. \"human\", \"agent\")",
+				},
+				"issuer": map[string]any{
+					"type":        "string",
+					"description": "Issuer or source of the principal identity",
+				},
+			},
+			"required": []string{"principal_type", "issuer"},
+		},
+	}, toolHandler("solvent_create_principal"))
+
+	server.AddTool(&mcp.Tool{
+		Name:        "solvent_revoke_principal",
+		Description: "Revoke a principal. The principal is recorded as revoked; existing FK references remain valid. Revocation is idempotent.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"principal_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the principal to revoke",
+				},
+			},
+			"required": []string{"principal_id"},
+		},
+	}, toolHandler("solvent_revoke_principal"))
+
+	server.AddTool(&mcp.Tool{
+		Name:        "solvent_create_target",
+		Description: "Create an authority target proposal. No authority is granted until Approve is called. The created_by field records attribution, not caller identity.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"principal_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the principal this target is for",
+				},
+				"resource_type": map[string]any{
+					"type":        "string",
+					"description": "Type of resource (e.g. \"cluster\", \"namespace\")",
+				},
+				"resource_id": map[string]any{
+					"type":        "string",
+					"description": "Identifier of the resource",
+				},
+				"scope": map[string]any{
+					"type":        "string",
+					"description": "Scope of authority (e.g. \"cluster\", \"namespace\")",
+				},
+				"action_namespace": map[string]any{
+					"type":        "string",
+					"description": "Namespace of the action (e.g. \"k8s\", \"db\")",
+				},
+				"action_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the action (e.g. \"deploy\", \"rollback\")",
+				},
+				"consequence_type": map[string]any{
+					"type":        "string",
+					"description": "Type of consequence (e.g. \"state_change\", \"data_write\")",
+				},
+				"consequence_parameters": map[string]any{
+					"type":        "string",
+					"description": "JSON-encoded consequence parameters",
+				},
+				"created_by": map[string]any{
+					"type":        "string",
+					"description": "UUID of the principal creating this target (attribution, not auth)",
+				},
+			},
+			"required": []string{"principal_id", "resource_type", "resource_id", "scope", "action_namespace", "action_name", "consequence_type", "consequence_parameters", "created_by"},
+		},
+	}, toolHandler("solvent_create_target"))
+
+	server.AddTool(&mcp.Tool{
+		Name:        "solvent_attach_justification",
+		Description: "Attach a promoted belief as justification for an authority target. Idempotent: duplicate attachment is a no-op. The target must not be activated.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"target_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the authority target",
+				},
+				"belief_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the promoted belief",
+				},
+				"belief_status": map[string]any{
+					"type":        "string",
+					"description": "Current status of the belief (typically \"promoted\")",
+				},
+				"attached_by": map[string]any{
+					"type":        "string",
+					"description": "UUID of the principal attaching the justification (attribution)",
+				},
+			},
+			"required": []string{"target_id", "belief_id", "belief_status", "attached_by"},
+		},
+	}, toolHandler("solvent_attach_justification"))
+
+	server.AddTool(&mcp.Tool{
+		Name:        "solvent_request_authorization",
+		Description: "Pin the current proposal and justification set for approval. Must be called before Approve. The hash is recomputed on each call.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"target_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the authority target",
+				},
+				"requested_by": map[string]any{
+					"type":        "string",
+					"description": "UUID of the principal requesting authorization (attribution)",
+				},
+			},
+			"required": []string{"target_id", "requested_by"},
+		},
+	}, toolHandler("solvent_request_authorization"))
+
+	server.AddTool(&mcp.Tool{
+		Name:        "solvent_approve",
+		Description: "Approve an authority target. Atomically creates an immutable snapshot and activation. This is the ONLY operation that creates authority. Only call from a trusted administrative surface — the approved_by field is attribution, not caller authentication.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"target_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the authority target to approve",
+				},
+				"approved_by": map[string]any{
+					"type":        "string",
+					"description": "UUID of the approving principal (attribution, not caller auth)",
+				},
+			},
+			"required": []string{"target_id", "approved_by"},
+		},
+	}, toolHandler("solvent_approve"))
+
+	server.AddTool(&mcp.Tool{
+		Name:        "solvent_authorize",
+		Description: "Read-only verification: check if an execution-time tuple matches the approved authority. Returns Allowed=true only on exact match with current belief state. Zero writes — no authorization_decision, no warrant, no receipt.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"target_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the authority target to authorize against",
+				},
+				"principal_id": map[string]any{
+					"type":        "string",
+					"description": "Presented principal ID",
+				},
+				"resource_type": map[string]any{
+					"type":        "string",
+					"description": "Presented resource type",
+				},
+				"resource_id": map[string]any{
+					"type":        "string",
+					"description": "Presented resource ID",
+				},
+				"scope": map[string]any{
+					"type":        "string",
+					"description": "Presented scope",
+				},
+				"action_namespace": map[string]any{
+					"type":        "string",
+					"description": "Presented action namespace",
+				},
+				"action_name": map[string]any{
+					"type":        "string",
+					"description": "Presented action name",
+				},
+				"consequence_type": map[string]any{
+					"type":        "string",
+					"description": "Presented consequence type",
+				},
+				"consequence_parameters": map[string]any{
+					"type":        "string",
+					"description": "JSON-encoded consequence parameters",
+				},
+			},
+			"required": []string{"target_id", "principal_id", "resource_type", "resource_id", "scope", "action_namespace", "action_name", "consequence_type", "consequence_parameters"},
+		},
+	}, toolHandler("solvent_authorize"))
+
+	server.AddTool(&mcp.Tool{
+		Name:        "solvent_revoke_target",
+		Description: "Revoke an authority target. Inserts an immutable revocation fact. Does not delete the activation — revocation does not free the once-ever activation uniqueness.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"target_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the authority target to revoke",
+				},
+				"revoked_by": map[string]any{
+					"type":        "string",
+					"description": "UUID of the principal revoking (attribution)",
+				},
+				"reason": map[string]any{
+					"type":        "string",
+					"description": "Reason for revocation",
+				},
+			},
+			"required": []string{"target_id", "revoked_by", "reason"},
+		},
+	}, toolHandler("solvent_revoke_target"))
+
+	server.AddTool(&mcp.Tool{
+		Name:        "solvent_discharge",
+		Description: "Record that a belief's debt obligation has been discharged by a principal. Idempotent: duplicate discharge (same belief + obligation + instrument + principal) is rejected.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"belief_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the belief whose debt is discharged",
+				},
+				"obligation_key": map[string]any{
+					"type":        "string",
+					"description": "Key identifying the obligation (e.g. \"needProvenanceCheck\")",
+				},
+				"instrument_ref": map[string]any{
+					"type":        "string",
+					"description": "Reference to the discharge instrument (e.g. \"attestation-123\")",
+				},
+				"discharged_by": map[string]any{
+					"type":        "string",
+					"description": "UUID of the principal performing the discharge (attribution)",
+				},
+			},
+			"required": []string{"belief_id", "obligation_key", "instrument_ref", "discharged_by"},
+		},
+	}, toolHandler("solvent_discharge"))
+
 	// 7. Run on stdio.
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {
 		fmt.Fprintf(os.Stderr, "server: %v\n", err)
@@ -283,6 +528,24 @@ func toolHandler(name string) mcp.ToolHandler {
 			return handleSolventFalsify(ctx, db, args)
 		case "solvent_explain":
 			return handleSolventExplain(ctx, db, args)
+		case "solvent_create_principal":
+			return handleSolventCreatePrincipal(ctx, db, args)
+		case "solvent_revoke_principal":
+			return handleSolventRevokePrincipal(ctx, db, args)
+		case "solvent_create_target":
+			return handleSolventCreateTarget(ctx, db, args)
+		case "solvent_attach_justification":
+			return handleSolventAttachJustification(ctx, db, args)
+		case "solvent_request_authorization":
+			return handleSolventRequestAuthorization(ctx, db, args)
+		case "solvent_approve":
+			return handleSolventApprove(ctx, db, args)
+		case "solvent_authorize":
+			return handleSolventAuthorize(ctx, db, args)
+		case "solvent_revoke_target":
+			return handleSolventRevokeTarget(ctx, db, args)
+		case "solvent_discharge":
+			return handleSolventDischarge(ctx, db, args)
 		default:
 			return errorResult(fmt.Errorf("unknown tool: %s", name)), nil
 		}

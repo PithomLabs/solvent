@@ -335,6 +335,247 @@ func handleSolventExplain(ctx context.Context, db *sql.DB, args map[string]inter
 	return jsonResult(explained), nil
 }
 
+// --- authority lifecycle handlers ---
+
+func handleSolventCreatePrincipal(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	principalType, _ := args["principal_type"].(string)
+	if principalType == "" {
+		return errorResult(fmt.Errorf("principal_type is required")), nil
+	}
+	issuer, _ := args["issuer"].(string)
+	if issuer == "" {
+		return errorResult(fmt.Errorf("issuer is required")), nil
+	}
+
+	st := kernel.New(db)
+	id, err := st.CreatePrincipal(ctx, principalType, issuer)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	return jsonResult(map[string]interface{}{
+		"principal_id":   id,
+		"principal_type": principalType,
+		"issuer":         issuer,
+	}), nil
+}
+
+func handleSolventRevokePrincipal(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	principalID, ok := args["principal_id"].(string)
+	if !ok || principalID == "" {
+		return errorResult(fmt.Errorf("principal_id is required")), nil
+	}
+
+	st := kernel.New(db)
+	if err := st.RevokePrincipal(ctx, principalID); err != nil {
+		return errorResult(err), nil
+	}
+
+	return jsonResult(map[string]interface{}{
+		"principal_id": principalID,
+		"revoked":      true,
+	}), nil
+}
+
+func handleSolventCreateTarget(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	principalID, _ := args["principal_id"].(string)
+	resourceType, _ := args["resource_type"].(string)
+	resourceID, _ := args["resource_id"].(string)
+	scope, _ := args["scope"].(string)
+	actionNS, _ := args["action_namespace"].(string)
+	actionName, _ := args["action_name"].(string)
+	consequenceType, _ := args["consequence_type"].(string)
+	consequenceParams, _ := args["consequence_parameters"].(string)
+	createdBy, _ := args["created_by"].(string)
+
+	if principalID == "" || resourceType == "" || resourceID == "" || scope == "" || actionNS == "" || actionName == "" || consequenceType == "" || createdBy == "" {
+		return errorResult(fmt.Errorf("all fields are required")), nil
+	}
+
+	params := []byte(consequenceParams)
+	if consequenceParams != "" && !json.Valid(params) {
+		return errorResult(fmt.Errorf("consequence_parameters must be valid JSON")), nil
+	}
+
+	st := kernel.New(db)
+	id, err := st.CreateTarget(ctx, principalID, resourceType, resourceID, scope, actionNS, actionName, consequenceType, params, createdBy)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	return jsonResult(map[string]interface{}{
+		"target_id":              id,
+		"principal_id":           principalID,
+		"resource_type":          resourceType,
+		"resource_id":            resourceID,
+		"scope":                  scope,
+		"action_namespace":       actionNS,
+		"action_name":            actionName,
+		"consequence_type":       consequenceType,
+		"consequence_parameters": consequenceParams,
+	}), nil
+}
+
+func handleSolventAttachJustification(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	targetID, _ := args["target_id"].(string)
+	beliefID, _ := args["belief_id"].(string)
+	beliefStatus, _ := args["belief_status"].(string)
+	attachedBy, _ := args["attached_by"].(string)
+
+	if targetID == "" || beliefID == "" || beliefStatus == "" || attachedBy == "" {
+		return errorResult(fmt.Errorf("all fields are required (target_id, belief_id, belief_status, attached_by)")), nil
+	}
+
+	st := kernel.New(db)
+	if err := st.AttachJustification(ctx, targetID, beliefID, beliefStatus, attachedBy); err != nil {
+		return errorResult(err), nil
+	}
+
+	return jsonResult(map[string]interface{}{
+		"target_id":     targetID,
+		"belief_id":     beliefID,
+		"belief_status": beliefStatus,
+		"attached":      true,
+	}), nil
+}
+
+func handleSolventRequestAuthorization(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	targetID, _ := args["target_id"].(string)
+	requestedBy, _ := args["requested_by"].(string)
+
+	if targetID == "" || requestedBy == "" {
+		return errorResult(fmt.Errorf("target_id and requested_by are required")), nil
+	}
+
+	st := kernel.New(db)
+	if err := st.RequestAuthorization(ctx, targetID, requestedBy); err != nil {
+		return errorResult(err), nil
+	}
+
+	return jsonResult(map[string]interface{}{
+		"target_id": targetID,
+		"requested": true,
+	}), nil
+}
+
+func handleSolventApprove(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	targetID, _ := args["target_id"].(string)
+	approvedBy, _ := args["approved_by"].(string)
+
+	if targetID == "" || approvedBy == "" {
+		return errorResult(fmt.Errorf("target_id and approved_by are required")), nil
+	}
+
+	st := kernel.New(db)
+	if err := st.Approve(ctx, targetID, approvedBy); err != nil {
+		return toolErrorResult(err), nil
+	}
+
+	return jsonResult(map[string]interface{}{
+		"target_id":   targetID,
+		"approved":    true,
+		"approved_by": approvedBy,
+	}), nil
+}
+
+func handleSolventAuthorize(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	targetID, _ := args["target_id"].(string)
+	if targetID == "" {
+		return errorResult(fmt.Errorf("target_id is required")), nil
+	}
+
+	cpStr, _ := args["consequence_parameters"].(string)
+	var cp []byte
+	if cpStr != "" {
+		cp = []byte(cpStr)
+		if !json.Valid(cp) {
+			return errorResult(fmt.Errorf("consequence_parameters must be valid JSON")), nil
+		}
+	}
+
+	tuple := kernel.AuthorityTuple{
+		PrincipalID:           fmt.Sprint(args["principal_id"]),
+		ResourceType:          fmt.Sprint(args["resource_type"]),
+		ResourceID:            fmt.Sprint(args["resource_id"]),
+		Scope:                 fmt.Sprint(args["scope"]),
+		ActionNamespace:       fmt.Sprint(args["action_namespace"]),
+		ActionName:            fmt.Sprint(args["action_name"]),
+		ConsequenceType:       fmt.Sprint(args["consequence_type"]),
+		ConsequenceParameters: cp,
+	}
+
+	for _, f := range []struct {
+		name, val string
+	}{
+		{"principal_id", tuple.PrincipalID},
+		{"resource_type", tuple.ResourceType},
+		{"resource_id", tuple.ResourceID},
+		{"scope", tuple.Scope},
+		{"action_namespace", tuple.ActionNamespace},
+		{"action_name", tuple.ActionName},
+		{"consequence_type", tuple.ConsequenceType},
+	} {
+		if f.val == "" || f.val == "<nil>" {
+			return errorResult(fmt.Errorf("%s is required", f.name)), nil
+		}
+	}
+
+	st := kernel.New(db)
+	result, err := st.Authorize(ctx, targetID, tuple)
+	if err != nil {
+		return toolErrorResult(err), nil
+	}
+
+	return jsonResult(map[string]interface{}{
+		"target_id": targetID,
+		"allowed":   result.Allowed,
+		"reason":    result.Reason,
+	}), nil
+}
+
+func handleSolventRevokeTarget(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	targetID, _ := args["target_id"].(string)
+	revokedBy, _ := args["revoked_by"].(string)
+	reason, _ := args["reason"].(string)
+
+	if targetID == "" || revokedBy == "" || reason == "" {
+		return errorResult(fmt.Errorf("target_id, revoked_by, and reason are required")), nil
+	}
+
+	st := kernel.New(db)
+	if err := st.RevokeTarget(ctx, targetID, revokedBy, reason); err != nil {
+		return toolErrorResult(err), nil
+	}
+
+	return jsonResult(map[string]interface{}{
+		"target_id": targetID,
+		"revoked":   true,
+	}), nil
+}
+
+func handleSolventDischarge(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	beliefID, _ := args["belief_id"].(string)
+	obligationKey, _ := args["obligation_key"].(string)
+	instrumentRef, _ := args["instrument_ref"].(string)
+	dischargedBy, _ := args["discharged_by"].(string)
+
+	if beliefID == "" || obligationKey == "" || instrumentRef == "" || dischargedBy == "" {
+		return errorResult(fmt.Errorf("all fields are required (belief_id, obligation_key, instrument_ref, discharged_by)")), nil
+	}
+
+	st := kernel.New(db)
+	if err := st.Discharge(ctx, beliefID, obligationKey, instrumentRef, dischargedBy); err != nil {
+		return toolErrorResult(err), nil
+	}
+
+	return jsonResult(map[string]interface{}{
+		"belief_id":      beliefID,
+		"obligation_key": obligationKey,
+		"instrument_ref": instrumentRef,
+		"discharged":     true,
+	}), nil
+}
+
 // --- helpers ---
 
 func jsonResult(v interface{}) *mcp.CallToolResult {
@@ -350,6 +591,12 @@ func errorResult(err error) *mcp.CallToolResult {
 		IsError: true,
 		Content: []mcp.Content{&mcp.TextContent{Text: string(b)}},
 	}
+}
+
+// toolErrorResult maps a kernel error to a structured MCP error result,
+// preserving SQLSTATE and constraint name when available.
+func toolErrorResult(err error) *mcp.CallToolResult {
+	return errorResult(err)
 }
 
 func envelopeResult(db *sql.DB, result interface{}, audit int) *mcp.CallToolResult {
