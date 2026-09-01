@@ -22,6 +22,17 @@ type Contract interface {
 	RetractCascade(context.Context, string, string) (int, error)
 	AuditLiveOnNonPromoted(context.Context, string) (int, error)
 	EnsureBelief(context.Context, string, string, ClaimType) (string, error)
+
+	// Authority lifecycle.
+	CreatePrincipal(context.Context, string, string) (string, error)
+	RevokePrincipal(context.Context, string) error
+	CreateTarget(context.Context, string, string, string, string, string, string, string, []byte, string) (string, error)
+	AttachJustification(context.Context, string, string, string, string) error
+	RequestAuthorization(context.Context, string, string) error
+	Approve(context.Context, string, string) error
+	Authorize(context.Context, string, AuthorityTuple) (AuthorizeResult, error)
+	RevokeTarget(context.Context, string, string, string) error
+	Discharge(context.Context, string, string, string, string) error
 }
 
 var (

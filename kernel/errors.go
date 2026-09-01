@@ -15,13 +15,28 @@ var (
 	// ErrActionOnUnpromoted reports that the composite FK refused an action intent
 	// because the cited belief is not currently promoted (invariant I-3).
 	ErrActionOnUnpromoted = errors.New("action refused: belief is not promoted")
+
+	// Authority lifecycle sentinels.
+
+	ErrTargetNotFound       = errors.New("target not found")
+	ErrAuthorizationMissing = errors.New("authorization request missing")
+	ErrApprovalPinMismatch  = errors.New("approval pin mismatch")
+	ErrAlreadyActivated     = errors.New("already activated")
+	ErrAlreadyRevoked       = errors.New("already revoked")
+	ErrTupleMismatch        = errors.New("tuple mismatch")
+	ErrBeliefNotPromoted    = errors.New("belief not promoted")
+	ErrRevokedPrincipal     = errors.New("revoked principal")
+	ErrDuplicateDischarge   = errors.New("duplicate discharge")
+	ErrTargetNotActivated   = errors.New("target not activated")
+	ErrInvalidProposal      = errors.New("invalid proposal")
 )
 
 // SQLSTATE codes this package classifies on. Contract §4: classification MUST use
 // SQLSTATE codes, never substring matching on error text.
 const (
-	sqlStateCheckViolation = "23514"
-	sqlStateFKViolation    = "23503"
+	sqlStateCheckViolation  = "23514"
+	sqlStateFKViolation     = "23503"
+	sqlStateUniqueViolation = "23505"
 )
 
 // sqlStater is satisfied by *pgconn.PgError (and by lib/pq's error type). Matching
