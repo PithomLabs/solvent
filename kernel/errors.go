@@ -23,7 +23,6 @@ var (
 	ErrApprovalPinMismatch  = errors.New("approval pin mismatch")
 	ErrAlreadyActivated     = errors.New("already activated")
 	ErrAlreadyRevoked       = errors.New("already revoked")
-	ErrTupleMismatch        = errors.New("tuple mismatch")
 	ErrBeliefNotPromoted    = errors.New("belief not promoted")
 	ErrRevokedPrincipal     = errors.New("revoked principal")
 	ErrDuplicateDischarge   = errors.New("duplicate discharge")

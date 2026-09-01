@@ -50,7 +50,14 @@ type Store struct{ db *sql.DB }
 func New(db *sql.DB) *Store { return &Store{db: db} }
 
 // EnterBelief inserts a claim at the door: status 'entered', carrying the full
+// EnterBelief inserts a new belief with the given claim, claim type, and
 // starting debt, unpromoted. Ideas enter free — this path is never gated.
+//
+// Not idempotent under client-timeout retries: a retry after a successful
+// commit but before the client receives the response creates a duplicate row.
+// Callers must handle duplicate creation gracefully. This is an accepted v0
+// limitation. Fixing it requires a unique constraint on (scenario_id, claim),
+// which changes the frozen schema.
 func (s *Store) EnterBelief(ctx context.Context, scenarioID, claim string, ct ClaimType) (string, error) {
 	// A copy, so a caller that mutates FullDebt cannot corrupt this write.
 	debt := append([]string(nil), FullDebt...)
@@ -102,8 +109,15 @@ func (s *Store) Promote(ctx context.Context, beliefID string) error {
 // IntentOnPromoted records intent to act on a belief.
 //
 // The composite FK (belief_id, 'promoted') -> belief(id, status) physically refuses
+// IntentOnPromoted records a live action intent. The database refuses
 // this unless the belief is currently promoted (I-3). A 23503 refusal is named
 // ErrActionOnUnpromoted with the driver error preserved underneath.
+//
+// Not idempotent under client-timeout retries: a retry after a successful
+// commit but before the client receives the response creates a duplicate
+// action intent row. Callers must handle duplicate creation gracefully.
+// This is an accepted v0 limitation. Fixing it requires a unique constraint
+// on the intent tuple, which changes the frozen schema.
 func (s *Store) IntentOnPromoted(ctx context.Context, scenarioID, beliefID, action string) error {
 	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, sqlIntentOnPromoted, scenarioID, beliefID, action)

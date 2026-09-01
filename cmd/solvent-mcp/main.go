@@ -1,7 +1,7 @@
 // Command solvent-mcp is a stdio MCP server exposing the Solvent transactional
-// belief ledger as six tools. The server is an adapter — it has no opinion about
-// beliefs. Every tool handler is exactly three moves: unmarshal → kernel call →
-// format.
+// belief ledger as sixteen tools. The server is an adapter — it has no opinion
+// about beliefs. Every tool handler is exactly three moves:
+// unmarshal → kernel call → format.
 package main
 
 import (
@@ -9,10 +9,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
 
-	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/kernel"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -25,6 +30,9 @@ var (
 
 	// db is the open database pool, set in main.
 	db *sql.DB
+
+	// log is the structured logger writing to stderr.
+	log *slog.Logger
 )
 
 // scenarioToID maps scenario names to their fixed UUIDs.
@@ -34,16 +42,22 @@ var scenarioToID = map[string]string{
 }
 
 func main() {
-	ctx := context.Background()
+	log = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	// 1. Read DSN from environment.
+	// 1. Graceful shutdown via signal.
+	ctx, stop := signal.NotifyContext(context.Background(),
+		os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// 2. Read DSN from environment.
 	dsn := os.Getenv("FABLE_DSN")
 	if dsn == "" {
+		log.Error("no DSN configured")
 		fmt.Fprintln(os.Stderr, "no DSN: set FABLE_DSN")
 		os.Exit(1)
 	}
 
-	// 2. Resolve fixture root.
+	// 3. Resolve fixture root.
 	fixtureRoot = os.Getenv("SOLVENT_FIXTURE_ROOT")
 	if fixtureRoot == "" {
 		exe, err := os.Executable()
@@ -52,39 +66,62 @@ func main() {
 		}
 	}
 	if fixtureRoot == "" {
+		log.Error("SOLVENT_FIXTURE_ROOT not set and no executable-relative fallback")
 		fmt.Fprintln(os.Stderr, "SOLVENT_FIXTURE_ROOT not set and no executable-relative fallback")
 		os.Exit(1)
 	}
 
-	// 3. Validate fixture directories exist.
+	// 4. Validate fixture directories exist.
 	for _, track := range []string{"track1", "track2"} {
 		dir := filepath.Join(fixtureRoot, track)
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			log.Error("track directory missing", "dir", dir)
 			fmt.Fprintf(os.Stderr, "SOLVENT_FIXTURE_ROOT: track directory missing: %s\n", dir)
 			os.Exit(1)
 		}
 	}
 
-	// 4. Open DB and ping.
+	// 5. Open DB and ping.
 	var err error
-	db, err = testdb.Open(dsn)
+	db, err = sql.Open("pgx", dsn)
 	if err != nil {
+		log.Error("database open failed", "error", err)
 		fmt.Fprintf(os.Stderr, "open: %v\n", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 	if err := db.PingContext(ctx); err != nil {
+		log.Error("database ping failed", "error", err)
 		fmt.Fprintf(os.Stderr, "ping: %v (is CockroachDB running? try: task setup)\n", err)
 		os.Exit(1)
 	}
 
-	// 5. Create MCP server.
+	// 6. Configure connection pool.
+	db.SetMaxOpenConns(envInt("SOLVENT_DB_MAX_OPEN_CONNS", 25))
+	db.SetMaxIdleConns(envInt("SOLVENT_DB_MAX_IDLE_CONNS", 5))
+	db.SetConnMaxLifetime(envDuration("SOLVENT_DB_CONN_MAX_LIFETIME", 5*time.Minute))
+
+	// 7. Validate schema.
+	if err := validateSchema(ctx); err != nil {
+		log.Error("schema validation failed", "error", err)
+		fmt.Fprintf(os.Stderr, "schema: %v\n", err)
+		os.Exit(1)
+	}
+
+	log.Info("solvent-mcp starting",
+		"version", "v0.1.0",
+		"tools", 16,
+		"dsn_configured", dsn != "",
+		"database_connected", true,
+	)
+
+	// 8. Create MCP server.
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "solvent",
 		Version: "v0.1.0",
 	}, nil)
 
-	// 6. Register 6 tools.
+	// Register all 16 tools.
 	server.AddTool(&mcp.Tool{
 		Name:        "solvent_ledger",
 		Description: "Read the current ledger for a scenario: beliefs with status and open debt, optionally their evidence, action intents with state, and the safety audit count. This is the only source of truth about current state. Call it before asserting any count, status, or identifier, and call it again after any mutation — never answer from memory of an earlier tool result, and never state a number you did not just read here.",
@@ -491,63 +528,176 @@ func main() {
 		},
 	}, toolHandler("solvent_discharge"))
 
-	// 7. Run on stdio.
+	// 9. Run on stdio.
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {
+		log.Error("server failed", "error", err)
 		fmt.Fprintf(os.Stderr, "server: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// validateSchema checks that the 7 authority tables exist and have the correct
+// signature constraints. This catches the two most important schema-version
+// mistakes: missing unique activation guard, missing FK cascade.
+func validateSchema(ctx context.Context) error {
+	// Check table existence.
+	var tableCount int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM information_schema.tables
+		 WHERE table_schema = 'public'
+		   AND table_name IN ('principal','authority_target',
+		     'target_snapshot','target_activation',
+		     'target_revocation','justification','debt_discharge')`,
+	).Scan(&tableCount); err != nil {
+		return fmt.Errorf("table check: %w", err)
+	}
+	if tableCount != 7 {
+		return fmt.Errorf("expected 7 authority tables, found %d — run db/ migrations", tableCount)
+	}
+
+	// Check signature constraint: target_activation has UNIQUE(target_id).
+	var activationIndex string
+	if err := db.QueryRowContext(ctx,
+		`SELECT indexdef FROM pg_indexes
+		 WHERE tablename = 'target_activation'
+		   AND indexdef LIKE '%UNIQUE%target_id'`,
+	).Scan(&activationIndex); err != nil {
+		return fmt.Errorf("missing UNIQUE(target_id) on target_activation: %w", err)
+	}
+
+	// Check signature constraint: justification FK has ON UPDATE CASCADE.
+	var constraintDef string
+	if err := db.QueryRowContext(ctx,
+		`SELECT pg_get_constraintdef(oid) FROM pg_constraint
+		 WHERE conrelid = 'justification'::regclass
+		   AND contype = 'f'
+		   AND pg_get_constraintdef(oid) LIKE '%ON UPDATE CASCADE%'`,
+	).Scan(&constraintDef); err != nil {
+		return fmt.Errorf("missing justification FK with ON UPDATE CASCADE: %w", err)
+	}
+
+	return nil
+}
+
+// envInt reads an int from the environment, returning def if unset or invalid.
+func envInt(key string, def int) int {
+	s := os.Getenv(key)
+	if s == "" {
+		return def
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
+// envDuration reads a duration from the environment, returning def if unset or invalid.
+func envDuration(key string, def time.Duration) time.Duration {
+	s := os.Getenv(key)
+	if s == "" {
+		return def
+	}
+	v, err := time.ParseDuration(s)
+	if err != nil {
+		return def
+	}
+	return v
 }
 
 // toolHandler maps a tool name to its handler function and returns a
 // mcp.ToolHandler that extracts raw arguments from the request.
 func toolHandler(name string) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		start := time.Now()
+
 		// Unmarshal raw arguments into a map.
 		var args map[string]interface{}
 		if req.Params != nil && len(req.Params.Arguments) > 0 {
 			if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-				return errorResult(fmt.Errorf("unmarshal args: %w", err)), nil
+				result := errorResult(fmt.Errorf("unmarshal args: %w", err))
+				log.Error("tool failed", "tool", name, "error", err, "duration_ms", time.Since(start).Milliseconds())
+				return result, nil
 			}
 		}
 		if args == nil {
 			args = make(map[string]interface{})
 		}
 
+		var (
+			result *mcp.CallToolResult
+			err    error
+		)
+
 		switch name {
 		case "solvent_ledger":
-			return handleSolventLedger(ctx, db, args)
+			result, err = handleSolventLedger(ctx, db, args)
 		case "solvent_ingest_evidence":
-			return handleSolventIngestEvidence(ctx, db, args)
+			result, err = handleSolventIngestEvidence(ctx, db, args)
 		case "solvent_retire_debt":
-			return handleSolventRetireDebt(ctx, db, args)
+			result, err = handleSolventRetireDebt(ctx, db, args)
 		case "solvent_promote":
-			return handleSolventPromote(ctx, db, args)
+			result, err = handleSolventPromote(ctx, db, args)
 		case "solvent_authorize_action":
-			return handleSolventAuthorizeAction(ctx, db, args)
+			result, err = handleSolventAuthorizeAction(ctx, db, args)
 		case "solvent_falsify":
-			return handleSolventFalsify(ctx, db, args)
+			result, err = handleSolventFalsify(ctx, db, args)
 		case "solvent_explain":
-			return handleSolventExplain(ctx, db, args)
+			result, err = handleSolventExplain(ctx, db, args)
 		case "solvent_create_principal":
-			return handleSolventCreatePrincipal(ctx, db, args)
+			result, err = handleSolventCreatePrincipal(ctx, db, args)
 		case "solvent_revoke_principal":
-			return handleSolventRevokePrincipal(ctx, db, args)
+			result, err = handleSolventRevokePrincipal(ctx, db, args)
 		case "solvent_create_target":
-			return handleSolventCreateTarget(ctx, db, args)
+			result, err = handleSolventCreateTarget(ctx, db, args)
 		case "solvent_attach_justification":
-			return handleSolventAttachJustification(ctx, db, args)
+			result, err = handleSolventAttachJustification(ctx, db, args)
 		case "solvent_request_authorization":
-			return handleSolventRequestAuthorization(ctx, db, args)
+			result, err = handleSolventRequestAuthorization(ctx, db, args)
 		case "solvent_approve":
-			return handleSolventApprove(ctx, db, args)
+			result, err = handleSolventApprove(ctx, db, args)
 		case "solvent_authorize":
-			return handleSolventAuthorize(ctx, db, args)
+			result, err = handleSolventAuthorize(ctx, db, args)
 		case "solvent_revoke_target":
-			return handleSolventRevokeTarget(ctx, db, args)
+			result, err = handleSolventRevokeTarget(ctx, db, args)
 		case "solvent_discharge":
-			return handleSolventDischarge(ctx, db, args)
+			result, err = handleSolventDischarge(ctx, db, args)
 		default:
-			return errorResult(fmt.Errorf("unknown tool: %s", name)), nil
+			result = errorResult(fmt.Errorf("unknown tool: %s", name))
 		}
+
+		duration := time.Since(start).Milliseconds()
+		if err != nil {
+			log.Error("tool failed", "tool", name, "error", err, "duration_ms", duration)
+		} else if result != nil && len(result.Content) > 0 {
+			// Check if the tool result contains an error indicator.
+			if textContent, ok := result.Content[0].(*mcp.TextContent); ok {
+				var body map[string]interface{}
+				if json.Unmarshal([]byte(textContent.Text), &body) == nil {
+					if hasError, _ := body["error"].(bool); hasError {
+						log.Error("tool returned error", "tool", name,
+							"error", truncate(slog.AnyValue(body["message"]).String(), 120),
+							"duration_ms", duration)
+					} else {
+						log.Info("tool completed", "tool", name, "duration_ms", duration)
+					}
+				}
+			}
+		} else {
+			log.Info("tool completed", "tool", name, "duration_ms", duration)
+		}
+
+		if result == nil && err != nil {
+			result = errorResult(err)
+		}
+		return result, nil
 	}
+}
+
+// truncate shortens a string to maxLen, appending "..." if truncated.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return strings.TrimSpace(s[:maxLen]) + "..."
 }

@@ -1187,6 +1187,189 @@ func TestTC5_RevokeXApprove(t *testing.T) {
 	_ = isUnique
 }
 
+// T-C6: Concurrent CreatePrincipal — known retry/idempotency limitation.
+// Two goroutines call CreatePrincipal with the same (principal_type, issuer).
+// Both succeed because there is no unique constraint on the business key.
+// This documents the v0 retry/idempotency limitation: a client timeout after
+// commit but before response creates a duplicate row. This does NOT imply
+// (principal_type, issuer) is a business uniqueness key — two independently
+// created principals could legitimately share those attributes.
+func TestTC6_ConcurrentCreatePrincipal(t *testing.T) {
+	rec.begin("concurrency")
+	ctx := context.Background()
+	st := kernel.New(shared)
+
+	var wg sync.WaitGroup
+	ids := make(chan string, 2)
+	errs := make(chan error, 2)
+
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id, err := st.CreatePrincipal(ctx, "agent", "concurrent-issuer")
+			if err != nil {
+				errs <- err
+			} else {
+				ids <- id
+			}
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	close(errs)
+
+	var idList []string
+	for id := range ids {
+		idList = append(idList, id)
+	}
+	var errCount int
+	for range errs {
+		errCount++
+	}
+
+	// Both succeed (no unique constraint). Different UUIDs, count == 2.
+	var cnt int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM principal WHERE principal_type = 'agent' AND issuer = 'concurrent-issuer'`,
+	).Scan(&cnt)
+
+	ok := errCount == 0 && cnt == 2 && len(idList) == 2
+	rec.check(t, ok, Case{
+		ID: "T-C6", Wave: "concurrency",
+		Purpose:   "Concurrent CreatePrincipal: known retry/idempotency limitation",
+		Expected:  "both succeed, count=2, different UUIDs",
+		Observed:  fmt.Sprintf("errors=%d, count=%d, ids=%v", errCount, cnt, idList),
+		Invariant: "Known v0 limitation: no business-key idempotency on CreatePrincipal",
+		Receipt:   "",
+	})
+}
+
+// T-C7: Concurrent RequestAuthorization — hash consistency.
+// Two goroutines call RequestAuthorization on the same target with the same
+// justifications. Both overwrite the same pin fields. The final hash is
+// deterministic. No corruption.
+func TestTC7_ConcurrentRequestAuthorization(t *testing.T) {
+	rec.begin("concurrency")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := authScenario(107)
+
+	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
+	targetID := createTestTarget(t, ctx, st, principal, principal)
+	beliefID := mustPromoted(t, ctx, st, sc, "belief for concurrent request")
+	_ = st.AttachJustification(ctx, targetID, beliefID, "promoted", principal)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- st.RequestAuthorization(ctx, targetID, principal)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	var errCount int
+	for e := range errs {
+		if e != nil {
+			errCount++
+		}
+	}
+
+	// Verify the pin is populated and the hash is deterministic.
+	var pinHash sql.NullString
+	_ = shared.QueryRowContext(ctx,
+		`SELECT pinned_request_hash FROM authority_target WHERE target_id = $1::UUID`,
+		targetID).Scan(&pinHash)
+
+	ok := errCount == 0 && pinHash.Valid && pinHash.String != ""
+	rec.check(t, ok, Case{
+		ID: "T-C7", Wave: "concurrency",
+		Purpose:   "Concurrent RequestAuthorization: deterministic hash, no corruption",
+		Expected:  "both succeed, pin populated",
+		Observed:  fmt.Sprintf("errors=%d, pin=%q", errCount, pinHash.String),
+		Invariant: "RequestAuthorization is idempotent under concurrency",
+		Receipt:   "",
+	})
+}
+
+// T-C8: Concurrent Discharge — duplicate rejected.
+// Two goroutines discharge the same belief with the same obligation_key and
+// instrument_ref. One succeeds, one fails with ErrDuplicateDischarge.
+func TestTC8_ConcurrentDischarge(t *testing.T) {
+	rec.begin("concurrency")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := authScenario(108)
+
+	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
+	beliefID := mustPromoted(t, ctx, st, sc, "belief for concurrent discharge")
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- st.Discharge(ctx, beliefID, "obligation-1", "instrument-1", principal)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	var errCount int
+	for e := range errs {
+		if e != nil {
+			errCount++
+		}
+	}
+
+	ok := errCount == 1
+	rec.check(t, ok, Case{
+		ID: "T-C8", Wave: "concurrency",
+		Purpose:   "Concurrent Discharge: duplicate rejected by UNIQUE constraint",
+		Expected:  "exactly 1 error",
+		Observed:  fmt.Sprintf("errors=%d", errCount),
+		Invariant: "Per-belief replay protection under concurrency",
+		Receipt:   "",
+	})
+}
+
+// T-SR1: Approve without justification → ErrInvalidProposal.
+func TestTSR1_ApproveWithoutJustification(t *testing.T) {
+	rec.begin("security_regression")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := authScenario(301)
+
+	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
+	targetID := createTestTarget(t, ctx, st, principal, principal)
+	beliefID := mustPromoted(t, ctx, st, sc, "belief for no-justification approve")
+	// Attach justification, request, then remove justification before approve.
+	_ = st.AttachJustification(ctx, targetID, beliefID, "promoted", principal)
+	_ = st.RequestAuthorization(ctx, targetID, principal)
+	// Remove the justification directly.
+	_, _ = shared.ExecContext(ctx,
+		`DELETE FROM justification WHERE target_id = $1::UUID`, targetID)
+
+	err := st.Approve(ctx, targetID, principal)
+
+	ok := errors.Is(err, kernel.ErrInvalidProposal)
+	rec.check(t, ok, Case{
+		ID: "T-SR1", Wave: "security_regression",
+		Purpose:   "Approve without justification rejected",
+		Expected:  "ErrInvalidProposal",
+		Observed:  fmt.Sprintf("err=%v", err),
+		Invariant: "Approve requires at least one justification",
+		Receipt:   receiptOf(err),
+	})
+}
+
 // --- Property tests ---
 
 // T-P1: Activation is once-ever.

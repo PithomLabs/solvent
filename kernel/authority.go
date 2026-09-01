@@ -53,6 +53,12 @@ type justification struct {
 }
 
 // CreatePrincipal inserts a new principal and returns its ID.
+//
+// Not idempotent under client-timeout retries: a retry after a successful
+// commit but before the client receives the response creates a duplicate
+// principal. Callers must handle duplicate creation gracefully. This is an
+// accepted v0 limitation. Fixing it requires a unique constraint on
+// (principal_type, issuer), which changes the frozen schema.
 func (s *Store) CreatePrincipal(ctx context.Context, principalType, issuer string) (string, error) {
 	var id string
 	err := crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
@@ -77,6 +83,12 @@ func (s *Store) RevokePrincipal(ctx context.Context, principalID string) error {
 
 // CreateTarget inserts an authority_target proposal. Pin fields (requested_by,
 // requested_at, pinned_request_hash) are left NULL. No authority is granted.
+//
+// Not idempotent under client-timeout retries: a retry after a successful
+// commit but before the client receives the response creates a duplicate
+// target. Callers must handle duplicate creation gracefully. This is an
+// accepted v0 limitation. Fixing it requires a unique constraint on the
+// business key tuple, which changes the frozen schema.
 func (s *Store) CreateTarget(ctx context.Context, principalID, resourceType, resourceID, scope, actionNamespace, actionName, consequenceType string, consequenceParameters []byte, createdBy string) (string, error) {
 	var id string
 	err := crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
@@ -193,6 +205,27 @@ func (s *Store) RequestAuthorization(ctx context.Context, targetID, requestedBy 
 			return err
 		}
 		if n == 0 {
+			// Diagnose the actual cause. Precedence: not found > revoked > activated.
+			var exists, revoked, activated bool
+			if diagErr := tx.QueryRowContext(ctx,
+				`SELECT EXISTS(SELECT 1 FROM authority_target WHERE target_id = $1::UUID),
+				        EXISTS(SELECT 1 FROM target_revocation WHERE target_id = $1::UUID),
+				        EXISTS(SELECT 1 FROM target_activation WHERE target_id = $1::UUID)`,
+				targetID).Scan(&exists, &revoked, &activated); diagErr != nil {
+				return diagErr
+			}
+			if !exists {
+				return ErrTargetNotFound
+			}
+			if revoked {
+				return ErrAlreadyRevoked
+			}
+			if activated {
+				return ErrAlreadyActivated
+			}
+			// Target exists but is neither activated nor revoked — the WHERE
+			// NOT EXISTS guards must have blocked. This should not happen for
+			// a proposed target, but return not-found as the safe fallback.
 			return ErrTargetNotFound
 		}
 		return nil

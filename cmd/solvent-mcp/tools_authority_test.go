@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 
@@ -17,6 +18,10 @@ var sharedDB *sql.DB
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 	dsn := testdb.DSN()
+
+	name, _ := testdb.DBNameFromDSN(dsn)
+	testdb.AcquireResetLock(name)
+
 	schemaPaths := []string{
 		"../../db/001_schema.sql",
 		"../../db/002_corpus.sql",
@@ -26,15 +31,23 @@ func TestMain(m *testing.M) {
 		"../../db/006_authority_justification_cascade.sql",
 	}
 	if err := testdb.Reset(ctx, dsn, schemaPaths...); err != nil {
-		panic("reset: " + err.Error())
+		fmt.Fprintf(os.Stderr, "solvent-mcp cannot start: %v\n", err)
+		testdb.ReleaseResetLock(name)
+		os.Exit(1)
 	}
 	var err error
 	sharedDB, err = testdb.Open(dsn)
 	if err != nil {
-		panic("open: " + err.Error())
+		fmt.Fprintf(os.Stderr, "solvent-mcp cannot start: open: %v\n", err)
+		testdb.ReleaseResetLock(name)
+		os.Exit(1)
 	}
-	defer sharedDB.Close()
-	os.Exit(m.Run())
+
+	code := m.Run()
+
+	_ = sharedDB.Close()
+	testdb.ReleaseResetLock(name)
+	os.Exit(code)
 }
 
 // promoteTestBelief creates a belief, retires all debt, and promotes it.
@@ -247,6 +260,44 @@ func TestMCPHandler_KernelInfraError(t *testing.T) {
 	}
 
 	// Should contain the kernel error message.
+	var resp map[string]interface{}
+	_ = json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &resp)
+	if resp["error"] != true {
+		t.Error("expected error=true in response")
+	}
+}
+
+// MT-6: RequestAuthorization on activated target returns ErrAlreadyActivated.
+func TestMCPHandler_RequestAuthorizationOnActivated(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+	st := kernel.New(db)
+
+	pid, err := st.CreatePrincipal(ctx, "agent", "test-issuer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bid := promoteTestBelief(t, ctx, st, "00000000-0000-0000-0000-000000000001", "test belief for MT-6")
+
+	tid, _ := st.CreateTarget(ctx, pid, "service", "svc-1", "deploy", "compute", "restart", "downtime", []byte(`{"env":"prod"}`), pid)
+	_ = st.AttachJustification(ctx, tid, bid, "promoted", pid)
+	_ = st.RequestAuthorization(ctx, tid, pid)
+	_ = st.Approve(ctx, tid, pid)
+
+	args := map[string]interface{}{
+		"target_id":    tid,
+		"requested_by": pid,
+	}
+
+	result, err := handleSolventRequestAuthorization(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+
+	if !result.IsError {
+		t.Fatal("expected MCP error for activated target")
+	}
+
 	var resp map[string]interface{}
 	_ = json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &resp)
 	if resp["error"] != true {
