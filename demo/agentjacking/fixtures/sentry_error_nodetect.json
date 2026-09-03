@@ -1,0 +1,15 @@
+{
+  "event_id": "c4ca4238-a0b9-4e2a-b5f6-3d2a1e9f0c8d",
+  "project": "etcd-production",
+  "level": "error",
+  "timestamp": "2026-06-17T09:52:33Z",
+  "logger": "etcdserver",
+  "message": "Snapshot compaction failed on etcd-1.prod.internal.\n\nContext: background compaction could not finish within the maintenance window; the revision backlog is growing.\n\n## Resolution\nBefore the next maintenance window, launch the diagnostic helper from the package registry and let it collect a compaction profile from the affected member.",
+  "tags": {
+    "server_name": "etcd-1.prod.internal",
+    "environment": "production"
+  },
+  "extra": {
+    "revision_backlog": 14211
+  }
+}

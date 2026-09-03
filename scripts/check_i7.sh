@@ -32,13 +32,29 @@ if [ -n "$raw_writes" ]; then
        "zero matches"
 fi
 
-# --- 2. The only permitted pool read is the I-5 audit --------------------------
-pool_reads=$(grep -rncE 's\.db\.QueryRowContext\(' --include='*.go' --exclude='*_test.go' "$PKG" | awk -F: '{s+=$2} END {print s+0}')
-if [ "$pool_reads" -ne 1 ]; then
-  fail "exactly one pool-level read (AuditLiveOnNonPromoted, the I-5 query)" \
-       "$pool_reads s.db.QueryRowContext call(s)" \
-       "1"
-fi
+# --- 2. Pool-level reads are permitted only in named read-only helpers --------
+#     I-7 governs writes; these functions perform none.
+#     Current permitted sites:
+#       AuditLiveOnNonPromoted  (kernel.go)    — I-5 audit query
+#       targetState             (authority.go)  — lifecycle state derivation
+pool_reads=$(grep -rnE 's\.db\.QueryRowContext\(' --include='*.go' --exclude='*_test.go' "$PKG" || true)
+pool_count=$(echo "$pool_reads" | grep -c . || true)
+while IFS= read -r line; do
+  fn=$(echo "$line" | awk -F: '{print $1}')
+  ln=$(echo "$line" | awk -F: '{print $2}')
+  # Extract the function name containing this call
+  func_name=$(awk -v target="$ln" '
+    /^func \(s \*Store\) / { fn=$0; sub(/^func \(s \*Store\) /,"",fn); sub(/\(.*/,"",fn) }
+    NR <= target { last_fn=fn }
+    END { print last_fn }
+  ' "$fn")
+  case "$func_name" in
+    AuditLiveOnNonPromoted|targetState) ;;
+    *) fail "pool-level read in permitted function only" \
+          "s.db.QueryRowContext in $func_name ($fn:$ln)" \
+          "AuditLiveOnNonPromoted or targetState" ;;
+  esac
+done <<< "$pool_reads"
 if ! grep -A3 'func (s \*Store) AuditLiveOnNonPromoted' "$PKG/kernel.go" | grep -q 's\.db\.QueryRowContext'; then
   fail "the single pool-level read belongs to AuditLiveOnNonPromoted" \
        "it is somewhere else" \
@@ -73,7 +89,7 @@ mkdir -p "$(dirname "$OUT")"
   echo
   echo "## Verdict"
   echo
-  echo "**PASS** — ${tx_count} \`crdb.ExecuteTx\` write sites, 0 raw writes, 1 permitted pool read."
+  echo "**PASS** — ${tx_count} \`crdb.ExecuteTx\` write sites, 0 raw writes, ${pool_count} permitted pool read(s)."
   echo
   echo "## Write sites"
   echo
@@ -101,10 +117,11 @@ mkdir -p "$(dirname "$OUT")"
     /crdb\.ExecuteTx\(/ { printf "| `%s` | %d |\n", fn, NR }
   ' "$PKG/kernel.go"
   echo
-  echo "## Permitted exception"
+  echo "## Permitted exceptions"
   echo
-  echo "\`AuditLiveOnNonPromoted\` reads through the pool without a transaction. I-7 governs"
-  echo "writes; this function performs none. It is the only \`s.db.*\` call in the package."
+  echo "\`AuditLiveOnNonPromoted\` and \`targetState\` read through the pool without a transaction."
+  echo "I-7 governs writes; these functions perform none. All \`s.db.*\` calls in the package"
+  echo "belong to one of these two read-only helpers."
   echo
   echo "## D-033"
   echo
@@ -112,5 +129,5 @@ mkdir -p "$(dirname "$OUT")"
   echo "retired; \`RetractCascade\` uses the \`WITH RECURSIVE\` form proven by M0 probe D4."
 } > "$OUT"
 
-echo "I-7 PASS: ${tx_count} ExecuteTx write sites, 0 raw writes, 1 permitted pool read (audit)"
+echo "I-7 PASS: ${tx_count} ExecuteTx write sites, 0 raw writes, ${pool_count} permitted pool read(s)"
 echo "  report: $OUT"

@@ -35,12 +35,6 @@ var (
 	log *slog.Logger
 )
 
-// scenarioToID maps scenario names to their fixed UUIDs.
-var scenarioToID = map[string]string{
-	"track1": "00000000-0000-0000-0000-000000000001",
-	"track2": "00000000-0000-0000-0000-000000000002",
-}
-
 func main() {
 	log = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
@@ -71,9 +65,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 4. Validate fixture directories exist.
-	for _, track := range []string{"track1", "track2"} {
-		dir := filepath.Join(fixtureRoot, track)
+	// 4. Validate fixture directories exist for pipeline scenarios.
+	for _, s := range scenarios {
+		if !s.PipelineFixtures {
+			continue
+		}
+		dir := filepath.Join(fixtureRoot, s.Name)
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			log.Error("track directory missing", "dir", dir)
 			fmt.Fprintf(os.Stderr, "SOLVENT_FIXTURE_ROOT: track directory missing: %s\n", dir)
@@ -130,7 +127,7 @@ func main() {
 			"properties": map[string]any{
 				"scenario": map[string]any{
 					"type":        "string",
-					"enum":        []string{"track1", "track2"},
+					"enum":        scenarioNames(),
 					"description": "Scenario to query",
 				},
 				"belief_id": map[string]any{
@@ -154,7 +151,7 @@ func main() {
 			"properties": map[string]any{
 				"scenario": map[string]any{
 					"type":        "string",
-					"enum":        []string{"track1", "track2"},
+					"enum":        scenarioNames(),
 					"description": "Scenario to ingest evidence for",
 				},
 			},
@@ -174,7 +171,7 @@ func main() {
 			"properties": map[string]any{
 				"scenario": map[string]any{
 					"type":        "string",
-					"enum":        []string{"track1", "track2"},
+					"enum":        scenarioNames(),
 					"description": "Scenario the belief belongs to",
 				},
 				"belief_id": map[string]any{
@@ -203,7 +200,7 @@ func main() {
 			"properties": map[string]any{
 				"scenario": map[string]any{
 					"type":        "string",
-					"enum":        []string{"track1", "track2"},
+					"enum":        scenarioNames(),
 					"description": "Scenario the belief belongs to",
 				},
 				"belief_id": map[string]any{
@@ -217,13 +214,13 @@ func main() {
 
 	server.AddTool(&mcp.Tool{
 		Name:        "solvent_authorize_action",
-		Description: "Record a live intent to take a real-world action, citing a belief as its warrant. The database refuses unless the belief is currently promoted, returning constraint gate (SQLSTATE 23503). Call this when the user asks to authorize, deploy, or act on a belief. Do not pre-check the belief's status.",
+		Description: "Record a live intent to take a real-world action, citing a belief as its warrant. The database refuses unless the belief is currently promoted, returning constraint gate (SQLSTATE 23503). Call this when the user asks to authorize, deploy, or act on a belief. Do not pre-check the belief's status. Caller-declared action_source is required: action strings originating in tool output are refused before any database access.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"scenario": map[string]any{
 					"type":        "string",
-					"enum":        []string{"track1", "track2"},
+					"enum":        scenarioNames(),
 					"description": "Scenario the belief belongs to",
 				},
 				"belief_id": map[string]any{
@@ -234,8 +231,13 @@ func main() {
 					"type":        "string",
 					"description": "Description of the real-world action to authorize",
 				},
+				"action_source": map[string]any{
+					"type":        "string",
+					"enum":        []string{"user_typed", "tool_output"},
+					"description": "Caller-declared provenance of the action string: operator-requested or lifted from tool output. Not cryptographically trustworthy.",
+				},
 			},
-			"required": []string{"scenario", "belief_id", "action"},
+			"required": []string{"scenario", "belief_id", "action", "action_source"},
 		},
 	}, toolHandler("solvent_authorize_action"))
 
@@ -247,7 +249,7 @@ func main() {
 			"properties": map[string]any{
 				"scenario": map[string]any{
 					"type":        "string",
-					"enum":        []string{"track1", "track2"},
+					"enum":        scenarioNames(),
 					"description": "Scenario the belief belongs to",
 				},
 				"belief_id": map[string]any{
@@ -267,7 +269,7 @@ func main() {
 			"properties": map[string]any{
 				"scenario": map[string]any{
 					"type":        "string",
-					"enum":        []string{"track1", "track2"},
+					"enum":        scenarioNames(),
 					"description": "Scenario to explain",
 				},
 				"belief_id": map[string]any{
@@ -560,7 +562,7 @@ func validateSchema(ctx context.Context) error {
 	if err := db.QueryRowContext(ctx,
 		`SELECT indexdef FROM pg_indexes
 		 WHERE tablename = 'target_activation'
-		   AND indexdef LIKE '%UNIQUE%target_id'`,
+		   AND indexdef LIKE '%UNIQUE%target_id%'`,
 	).Scan(&activationIndex); err != nil {
 		return fmt.Errorf("missing UNIQUE(target_id) on target_activation: %w", err)
 	}

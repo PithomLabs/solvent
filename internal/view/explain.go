@@ -57,6 +57,7 @@ func ExplainSnapshot(scenario string, scenarioID string, snap *Snapshot) *Explai
 		Scenario:               scenario,
 		ScenarioID:             scenarioID,
 		AuditLiveOnNonPromoted: snap.AuditLiveOnNonPromoted,
+		Beliefs:                []BeliefExplain{},
 	}
 
 	// Index counts and intents by belief.

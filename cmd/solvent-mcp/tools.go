@@ -19,9 +19,9 @@ import (
 // handleSolventLedger reads the current ledger for a scenario.
 func handleSolventLedger(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	scenario, _ := args["scenario"].(string)
-	scenarioID, ok := scenarioToID[scenario]
+	scenarioID, ok := lookupScenario(scenario)
 	if !ok {
-		return errorResult(fmt.Errorf("unknown scenario: %q (valid: track1, track2)", scenario)), nil
+		return errorResult(fmt.Errorf("unknown scenario: %q (valid: %s)", scenario, strings.Join(scenarioNames(), ", "))), nil
 	}
 
 	beliefIDRaw, hasBelief := args["belief_id"]
@@ -53,9 +53,9 @@ func handleSolventLedger(ctx context.Context, db *sql.DB, args map[string]interf
 // handleSolventIngestEvidence processes pinned evidence fixtures for a scenario.
 func handleSolventIngestEvidence(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	scenario, _ := args["scenario"].(string)
-	scenarioID, ok := scenarioToID[scenario]
+	scenarioID, ok := lookupScenario(scenario)
 	if !ok {
-		return errorResult(fmt.Errorf("unknown scenario: %q (valid: track1, track2)", scenario)), nil
+		return errorResult(fmt.Errorf("unknown scenario: %q (valid: %s)", scenario, strings.Join(scenarioNames(), ", "))), nil
 	}
 
 	fixtureDir := filepath.Join(fixtureRoot, scenario)
@@ -109,9 +109,9 @@ func handleSolventRetireDebt(ctx context.Context, db *sql.DB, args map[string]in
 	item, _ := args["debt_item"].(string)
 	scenario, _ := args["scenario"].(string)
 
-	scenarioID, ok := scenarioToID[scenario]
+	scenarioID, ok := lookupScenario(scenario)
 	if !ok {
-		return errorResult(fmt.Errorf("unknown scenario: %q (valid: track1, track2)", scenario)), nil
+		return errorResult(fmt.Errorf("unknown scenario: %q (valid: %s)", scenario, strings.Join(scenarioNames(), ", "))), nil
 	}
 
 	// An unrecognised debt item is refused here, not by the schema.
@@ -173,9 +173,9 @@ func handleSolventPromote(ctx context.Context, db *sql.DB, args map[string]inter
 	}
 	scenario, _ := args["scenario"].(string)
 
-	scenarioID, ok := scenarioToID[scenario]
+	scenarioID, ok := lookupScenario(scenario)
 	if !ok {
-		return errorResult(fmt.Errorf("unknown scenario: %q (valid: track1, track2)", scenario)), nil
+		return errorResult(fmt.Errorf("unknown scenario: %q (valid: %s)", scenario, strings.Join(scenarioNames(), ", "))), nil
 	}
 
 	// Cross-scenario guard: verify the belief belongs to this scenario.
@@ -203,6 +203,23 @@ func handleSolventPromote(ctx context.Context, db *sql.DB, args map[string]inter
 // handleSolventAuthorizeAction records a live intent to act on a belief.
 // The database refuses unless the belief is currently promoted (SQLSTATE 23503).
 func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	// Validate action_source before any database access. This is a caller-declared
+	// provenance signal, not a cryptographically trustworthy guarantee — it catches
+	// honest misuse but cannot prove that an adversarial agent actually received the
+	// action from a human. The database gate remains the real security boundary.
+	//
+	// Errors here use errorResult (no audit envelope, no AuditIntent, no DB read)
+	// so the absence of the envelope is the observable fingerprint of the DB-free path.
+	actionSource, _ := args["action_source"].(string)
+	switch actionSource {
+	case "tool_output":
+		return errorResult(fmt.Errorf("action strings may not originate in tool output: retrieval is not authority")), nil
+	case "user_typed":
+		// valid — continue to the database path below
+	default:
+		return errorResult(fmt.Errorf("action_source is required and must be \"user_typed\" or \"tool_output\"")), nil
+	}
+
 	beliefID, ok := args["belief_id"].(string)
 	if !ok || beliefID == "" {
 		return errorResult(fmt.Errorf("belief_id is required and must be a string")), nil
@@ -210,9 +227,9 @@ func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[stri
 	scenario, _ := args["scenario"].(string)
 	action, _ := args["action"].(string)
 
-	scenarioID, ok := scenarioToID[scenario]
+	scenarioID, ok := lookupScenario(scenario)
 	if !ok {
-		return errorResult(fmt.Errorf("unknown scenario: %q (valid: track1, track2)", scenario)), nil
+		return errorResult(fmt.Errorf("unknown scenario: %q (valid: %s)", scenario, strings.Join(scenarioNames(), ", "))), nil
 	}
 
 	// Cross-scenario guard: verify the belief belongs to this scenario.
@@ -247,9 +264,9 @@ func handleSolventFalsify(ctx context.Context, db *sql.DB, args map[string]inter
 	}
 	scenario, _ := args["scenario"].(string)
 
-	scenarioID, ok := scenarioToID[scenario]
+	scenarioID, ok := lookupScenario(scenario)
 	if !ok {
-		return errorResult(fmt.Errorf("unknown scenario: %q (valid: track1, track2)", scenario)), nil
+		return errorResult(fmt.Errorf("unknown scenario: %q (valid: %s)", scenario, strings.Join(scenarioNames(), ", "))), nil
 	}
 
 	// Cross-scenario guard: verify the belief belongs to this scenario.
@@ -288,9 +305,9 @@ func handleSolventFalsify(ctx context.Context, db *sql.DB, args map[string]inter
 // reported when actually emitted; predictions are labeled as predicted_*.
 func handleSolventExplain(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	scenario, _ := args["scenario"].(string)
-	scenarioID, ok := scenarioToID[scenario]
+	scenarioID, ok := lookupScenario(scenario)
 	if !ok {
-		return errorResult(fmt.Errorf("unknown scenario: %q (valid: track1, track2)", scenario)), nil
+		return errorResult(fmt.Errorf("unknown scenario: %q (valid: %s)", scenario, strings.Join(scenarioNames(), ", "))), nil
 	}
 
 	beliefIDRaw, hasBelief := args["belief_id"]

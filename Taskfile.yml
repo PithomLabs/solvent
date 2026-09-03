@@ -45,6 +45,12 @@ tasks:
     cmds:
       - bash scripts/demo/track2.sh
 
+  demo:agentjacking:
+    desc: Run the Agentjacking demo (poisoned telemetry → evidence → refused authority)
+    deps: [db:up]
+    cmds:
+      - bash scripts/demo/agentjacking.sh
+
   inspect:
     desc: Show a human-readable snapshot of the current ledger
     cmds:
@@ -264,6 +270,15 @@ tasks:
           exit 1
         fi
         echo "I-7 MCP boundary: PASS"
+      # sentry_error containment — only internal/agentjacking may name the adapter source type.
+      # The generic packages (normalize, derive, belief, kernel, pipeline, db) must not know about
+      # Sentry; the adapter boundary keeps source-specific semantics out of the core.
+      - |
+        if grep -rnF 'sentry_error' --include='*.go' internal/normalize internal/derive internal/belief kernel internal/pipeline db/; then
+          echo "FAIL: sentry_error leaked into core packages"
+          exit 1
+        fi
+        echo "sentry_error containment: PASS"
       # The MCP server's own protocol surface, spoken to over stdio.
       #
       # The static greps above prove the MCP layer cannot write; they say nothing about

