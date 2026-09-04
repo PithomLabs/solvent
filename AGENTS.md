@@ -58,6 +58,50 @@ implementations, and changing the source must not require kernel changes.
 
 ---
 
+# Current vs. Future Architecture
+
+```
+CURRENT (v0 MVP):
+
+  evidence
+    ↓
+  belief
+    ↓
+  promotion
+    ↓
+  authority
+    ↓
+  intent
+
+FUTURE (when real execution exists):
+
+  intent
+    ↓
+  ExecuteAction
+    ↓
+  current-state revalidation
+    ↓
+  kernel.Authorize
+    ↓
+  Executor
+    ↓
+  external provider
+```
+
+**The current product has no real external consequential execution capability.** `ExecuteAction` is
+the canonical future execution boundary — designed, tested, but not yet wired to production. The
+executor registry is instantiated but empty. When execution is introduced, it MUST use:
+
+```
+ExecuteAction → current-state revalidation → kernel.Authorize → Executor
+```
+
+Intent creation, belief promotion, evidence ingestion, and authority creation MUST NOT directly
+invoke consequential external provider side effects. Any future consequential side effect MUST
+originate from `ExecuteAction` → current authorization → Executor.
+
+---
+
 # Retrieval rules
 
 - **Never fabricate vectors.** No synthetic embeddings, no fallback path that invents a result when a

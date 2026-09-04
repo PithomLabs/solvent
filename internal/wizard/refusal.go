@@ -136,7 +136,7 @@ func (s *Server) Authorize(ctx context.Context, scenarioID, beliefID string) Ver
 	if s.authSvc != nil {
 		targetID := "00000000-0000-0000-0000-000000000001"
 		actorID := "00000000-0000-0000-0000-000000000001"
-		decision, err := s.authSvc.PrepareForAction(ctx, scenarioID, beliefID, DeployAction, targetID, actorID, "execution", nil)
+		decision, err := s.authSvc.PrepareForAction(ctx, scenarioID, beliefID, DeployAction, targetID, actorID, "execution", []byte("{}"))
 		if err != nil {
 			return s.refuse(ctx, scenarioID, StmtAuthorize, err, "authority_verification_failed")
 		}

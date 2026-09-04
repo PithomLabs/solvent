@@ -245,21 +245,23 @@ func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[stri
 	// Authority verification: call PrepareForAction before intent creation.
 	// This re-reads current state and delegates to kernel.Authorize.
 	// Intent creation is NOT execution — execution must independently revalidate.
+	// Incomplete authorization context (missing target_id or actor_id) fails closed.
 	if authSvc != nil {
 		targetID, _ := args["target_id"].(string)
 		actorID, _ := args["actor_id"].(string)
-		if targetID != "" && actorID != "" {
-			decision, err := authSvc.PrepareForAction(ctx, scenarioID, beliefID, action, targetID, actorID, "execution", nil)
-			if err != nil {
-				return envelopeErrorResult(ctx, db, toolError(err), scenarioID), nil
+		if targetID == "" || actorID == "" {
+			return errorResult(fmt.Errorf("target_id and actor_id are required for authority verification")), nil
+		}
+		decision, err := authSvc.PrepareForAction(ctx, scenarioID, beliefID, action, targetID, actorID, "execution", []byte("{}"))
+		if err != nil {
+			return envelopeErrorResult(ctx, db, toolError(err), scenarioID), nil
+		}
+		if !decision.Allowed {
+			errMap := map[string]interface{}{
+				"error":   true,
+				"message": fmt.Sprintf("authority denied: %s", decision.Reason),
 			}
-			if !decision.Allowed {
-				errMap := map[string]interface{}{
-					"error":   true,
-					"message": fmt.Sprintf("authority denied: %s", decision.Reason),
-				}
-				return envelopeErrorResult(ctx, db, errMap, scenarioID), nil
-			}
+			return envelopeErrorResult(ctx, db, errMap, scenarioID), nil
 		}
 	}
 

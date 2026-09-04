@@ -115,6 +115,10 @@ func main() {
 	// 8. Initialize services.
 	policySvc := policy.New(db)
 	auditSvc := audit.New(db)
+	// Executor registry is instantiated but empty. No production executor
+	// exists. This is the future wiring point for real execution. When
+	// execution is introduced, register executors here and they will be
+	// reachable via ExecuteAction → kernel.Authorize → Executor.
 	execReg := executor.NewRegistry()
 	authSvc = authority.New(db, policySvc, auditSvc, execReg)
 
@@ -249,8 +253,16 @@ func main() {
 					"enum":        []string{"user_typed", "tool_output"},
 					"description": "Caller-declared provenance of the action string: operator-requested or lifted from tool output. Not cryptographically trustworthy.",
 				},
+				"target_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the authority target to authorize against",
+				},
+				"actor_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the principal requesting the action",
+				},
 			},
-			"required": []string{"scenario", "belief_id", "action", "action_source"},
+			"required": []string{"scenario", "belief_id", "action", "action_source", "target_id", "actor_id"},
 		},
 	}, toolHandler("solvent_authorize_action"))
 

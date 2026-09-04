@@ -1,4 +1,15 @@
-// Command operator-review has two modes:
+// Command operator-review is trusted administrative tooling.
+//
+// It operates under the operator's direct authority, not the automated
+// authority boundary enforced by service/authority. It calls
+// kernel.IntentOnPromoted directly without PrepareForAction. This is
+// intentional: the operator is the authority source for seed data and
+// review actions.
+//
+// Trust boundary: if operator-review ever creates consequential external
+// execution, it MUST use the canonical ExecuteAction path.
+//
+// Two modes:
 //
 // 1. Enter a new belief (Track 2 baseline entry):
 //

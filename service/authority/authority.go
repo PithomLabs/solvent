@@ -15,7 +15,6 @@ package authority
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -195,6 +194,11 @@ func (s *Service) ExecuteAction(
 	}
 
 	// 3. Resolve executor from internal registry (NOT caller-supplied).
+	//
+	// Future invariant: when real executors are introduced, tool_name must NOT
+	// become a caller-controlled arbitrary consequential capability selector.
+	// Executor selection must be constrained by the authorized consequence/action
+	// and a trusted internal mapping, not by caller-supplied params.
 	toolName, _ := params["tool_name"].(string)
 	fn, ok := s.execReg.Get(toolName)
 	if !ok {
@@ -266,21 +270,4 @@ func (s *Service) getBeliefStatus(ctx context.Context, scenarioID, beliefID stri
 		return "", fmt.Errorf("query belief: %w", err)
 	}
 	return status, nil
-}
-
-// GetToken retrieves a workflow token by ID (exposed for external callers).
-func (s *Service) GetToken(ctx context.Context, tokenID string) (map[string]interface{}, error) {
-	var payload []byte
-	var state string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT state, payload FROM workflow_token WHERE id = $1::UUID`, tokenID).Scan(&state, &payload)
-	if err != nil {
-		return nil, fmt.Errorf("get token: %w", err)
-	}
-	var p map[string]interface{}
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return nil, fmt.Errorf("unmarshal payload: %w", err)
-	}
-	p["state"] = state
-	return p, nil
 }

@@ -81,6 +81,8 @@ func main() {
 	// arriving at the recorded URL should never meet a dead site.
 	policySvc := policy.New(db)
 	auditSvc := audit.New(db)
+	// Executor registry is instantiated but empty. No production executor
+	// exists. This is the future wiring point for real execution.
 	execReg := executor.NewRegistry()
 	authSvc := authority.New(db, policySvc, auditSvc, execReg)
 

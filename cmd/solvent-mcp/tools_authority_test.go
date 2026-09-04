@@ -10,6 +10,10 @@ import (
 
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/service/audit"
+	"github.com/PithomLabs/solvent/service/authority"
+	"github.com/PithomLabs/solvent/service/executor"
+	"github.com/PithomLabs/solvent/service/policy"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -302,5 +306,228 @@ func TestMCPHandler_RequestAuthorizationOnActivated(t *testing.T) {
 	_ = json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &resp)
 	if resp["error"] != true {
 		t.Error("expected error=true in response")
+	}
+}
+
+// setupAuthorityState creates the minimum authority state needed for
+// handleSolventAuthorizeAction: a principal, a promoted belief, and an
+// approved target with justification linking the belief.
+func setupAuthorityState(t *testing.T, ctx context.Context, st *kernel.Store, scenarioID string) (actorID, targetID, beliefID string) {
+	t.Helper()
+
+	pid, err := st.CreatePrincipal(ctx, "agent", "test-authorize-action")
+	if err != nil {
+		t.Fatalf("setup (create principal): %v", err)
+	}
+	actorID = pid
+
+	bid := promoteTestBelief(t, ctx, st, scenarioID, "test belief for authorize action")
+	beliefID = bid
+
+	// Create target matching PrepareForAction's tuple construction:
+	//   ResourceType = "scenario", ResourceID = scenarioID,
+	//   Scope = "belief:"+beliefID, ActionNamespace = "solvent",
+	//   ActionName = "deploy etcd v3.5.28", ConsequenceType = "execution"
+	tid, err := st.CreateTarget(ctx, pid, "scenario", scenarioID, "belief:"+bid, "solvent", "deploy etcd v3.5.28", "execution", []byte("{}"), pid)
+	if err != nil {
+		t.Fatalf("setup (create target): %v", err)
+	}
+	targetID = tid
+
+	if err := st.AttachJustification(ctx, tid, bid, "promoted", pid); err != nil {
+		t.Fatalf("setup (attach justification): %v", err)
+	}
+	if err := st.RequestAuthorization(ctx, tid, pid); err != nil {
+		t.Fatalf("setup (request authorization): %v", err)
+	}
+	if err := st.Approve(ctx, tid, pid); err != nil {
+		t.Fatalf("setup (approve): %v", err)
+	}
+
+	return actorID, targetID, beliefID
+}
+
+// initAuthSvc sets the package-level authSvc global for tests that need
+// authority verification. Must be called before the handler under test.
+func initAuthSvc(t *testing.T, db *sql.DB) {
+	t.Helper()
+	pol := policy.New(db)
+	aud := audit.New(db)
+	reg := executor.NewRegistry()
+	authSvc = authority.New(db, pol, aud, reg)
+	t.Cleanup(func() { authSvc = nil })
+}
+
+// TestAuthorizeAction_MissingTargetID proves that omitting target_id
+// rejects the request before any intent is created.
+func TestAuthorizeAction_MissingTargetID(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+	st := kernel.New(db)
+	initAuthSvc(t, db)
+
+	scenarioID := "00000000-0000-0000-0000-000000000001"
+	actorID, _, beliefID := setupAuthorityState(t, ctx, st, scenarioID)
+
+	args := map[string]interface{}{
+		"scenario":      "track1",
+		"belief_id":     beliefID,
+		"action":        "deploy etcd v3.5.28",
+		"action_source": "user_typed",
+		"actor_id":      actorID,
+		// target_id intentionally omitted
+	}
+
+	result, err := handleSolventAuthorizeAction(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected rejection when target_id is missing")
+	}
+
+	var resp map[string]interface{}
+	_ = json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &resp)
+	if resp["error"] != true {
+		t.Errorf("expected error=true, got: %v", resp)
+	}
+}
+
+// TestAuthorizeAction_MissingActorID proves that omitting actor_id
+// rejects the request before any intent is created.
+func TestAuthorizeAction_MissingActorID(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+	st := kernel.New(db)
+	initAuthSvc(t, db)
+
+	scenarioID := "00000000-0000-0000-0000-000000000001"
+	_, targetID, beliefID := setupAuthorityState(t, ctx, st, scenarioID)
+
+	args := map[string]interface{}{
+		"scenario":      "track1",
+		"belief_id":     beliefID,
+		"action":        "deploy etcd v3.5.28",
+		"action_source": "user_typed",
+		"target_id":     targetID,
+		// actor_id intentionally omitted
+	}
+
+	result, err := handleSolventAuthorizeAction(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected rejection when actor_id is missing")
+	}
+
+	var resp map[string]interface{}
+	_ = json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &resp)
+	if resp["error"] != true {
+		t.Errorf("expected error=true, got: %v", resp)
+	}
+}
+
+// TestAuthorizeAction_MalformedTargetID proves that a non-UUID target_id
+// is rejected before any intent is created.
+func TestAuthorizeAction_MalformedTargetID(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+	st := kernel.New(db)
+	initAuthSvc(t, db)
+
+	scenarioID := "00000000-0000-0000-0000-000000000001"
+	actorID, _, beliefID := setupAuthorityState(t, ctx, st, scenarioID)
+
+	args := map[string]interface{}{
+		"scenario":      "track1",
+		"belief_id":     beliefID,
+		"action":        "deploy etcd v3.5.28",
+		"action_source": "user_typed",
+		"target_id":     "not-a-valid-uuid",
+		"actor_id":      actorID,
+	}
+
+	result, err := handleSolventAuthorizeAction(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected rejection for malformed target_id")
+	}
+}
+
+// TestAuthorizeAction_MalformedActorID proves that a non-UUID actor_id
+// is rejected before any intent is created.
+func TestAuthorizeAction_MalformedActorID(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+	st := kernel.New(db)
+	initAuthSvc(t, db)
+
+	scenarioID := "00000000-0000-0000-0000-000000000001"
+	_, targetID, beliefID := setupAuthorityState(t, ctx, st, scenarioID)
+
+	args := map[string]interface{}{
+		"scenario":      "track1",
+		"belief_id":     beliefID,
+		"action":        "deploy etcd v3.5.28",
+		"action_source": "user_typed",
+		"target_id":     targetID,
+		"actor_id":      "not-a-valid-uuid",
+	}
+
+	result, err := handleSolventAuthorizeAction(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected rejection for malformed actor_id")
+	}
+}
+
+// TestAuthorizeAction_ValidArgs proves that valid target_id + actor_id
+// preserves existing authorization behavior.
+func TestAuthorizeAction_ValidArgs(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+	st := kernel.New(db)
+	initAuthSvc(t, db)
+
+	scenarioID := "00000000-0000-0000-0000-000000000001"
+	actorID, targetID, beliefID := setupAuthorityState(t, ctx, st, scenarioID)
+
+	args := map[string]interface{}{
+		"scenario":      "track1",
+		"belief_id":     beliefID,
+		"action":        "deploy etcd v3.5.28",
+		"action_source": "user_typed",
+		"target_id":     targetID,
+		"actor_id":      actorID,
+	}
+
+	result, err := handleSolventAuthorizeAction(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("handler returned MCP error: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	// Unwrap envelope: {"result": {...}, "audit": {...}}
+	inner, ok := resp["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected result envelope, got: %v", resp)
+	}
+	if inner["intent_state"] != "live" {
+		t.Errorf("intent_state = %v, want live", inner["intent_state"])
+	}
+	if inner["belief_id"] != beliefID {
+		t.Errorf("belief_id = %v, want %s", inner["belief_id"], beliefID)
 	}
 }

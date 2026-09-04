@@ -1,160 +1,162 @@
-# Security Gate Report V2: Adversarial Code Review
+# Security Gate Report V2: Scope-Corrected Adversarial Review
 
 **Date:** 2026-09-04
-**Status:** GO (fresh CockroachDB v26.2.0 Docker-verified, `go test -count=1 -p 1 ./...` all green)
-**Reviewer:** opencode adversarial review (final pass)
-**Trigger:** Plan 5.2 implementation — recording executor + integration tests
+**Status:** GO (scope-corrected, CockroachDB v26.2.0 verified, `go test -count=1 -p 1 ./...` all green, final adversarial review passed)
+**Reviewer:** opencode adversarial review (final scope-aware pass per Plan 6)
+**Trigger:** Plan 5.2 implementation + Plan 6 scope correction
 
 ---
 
-## A. Current Execution-Path Diagram
+## A. Current Architecture — Honest Status
 
 ```
-MCP / Wizard / future execution entry
-        ↓
-ExecuteAction (service/authority/authority.go:155)
-        ↓
-PrepareForAction (service/authority/authority.go:80)
-        ↓
-kernel.Authorize (kernel/authority.go:363)
-        ↓
-Executor (internal registry, test-only recording executor for now)
+CURRENT (v0 MVP):
+
+  evidence
+    ↓
+  belief
+    ↓
+  promotion
+    ↓
+  authority
+    ↓
+  intent
+
+FUTURE (when real execution exists):
+
+  intent
+    ↓
+  ExecuteAction
+    ↓
+  current-state revalidation
+    ↓
+  kernel.Authorize
+    ↓
+  Executor
+    ↓
+  external provider
 ```
 
-**No workflow in execution path.** Workflow tokens are continuity-only.
+**There is no real consequential production execution capability.** `ExecuteAction` has zero production callers. The executor registry is empty in both production binaries. No route, handler, tool, or CLI command invokes any executor.
+
+This is a **product-scope fact**, not a security defect.
 
 ---
 
-## B. Previously Bypassing Paths and Whether Each Is Fixed
+## B. Production Execution Path Audit
 
-| Path | Status | Notes |
-|------|--------|-------|
-| MCP handler → kernel.Store directly | Partially fixed | `handleSolventAuthorizeAction` calls `PrepareForAction` before `IntentOnPromoted`. But authority check is optional when targetID/actorID omitted. |
-| Wizard handler → kernel.Store directly | Fixed | `Server.Authorize` calls `PrepareForAction` before `IntentOnPromoted`. |
-| Pipeline → kernel.Store directly | Not applicable | Pipeline creates beliefs/intents, does not execute. |
-| ExecuteAction → executor | Defined, not wired | `ExecuteAction` has zero production callers. Test-only recording executor proves boundary. |
+| Entry Point | Path | Classification |
+|-------------|------|----------------|
+| `handleSolventAuthorizeAction` (MCP) | `PrepareForAction` → `IntentOnPromoted` | INTENT CREATION ONLY |
+| `Server.Authorize` (Wizard) | `PrepareForAction` → `IntentOnPromoted` | INTENT CREATION ONLY |
+| `cmd/operator-review` (CLI) | `kernel.IntentOnPromoted` (direct) | ADMINISTRATIVE CLI |
+| `pipeline.Run` | `intent.Propose` → `kernel.IntentOnPromoted` | PIPELINE ONLY |
+| `ExecuteAction` (service) | `PrepareForAction` → `kernel.Authorize` → executor | FUTURE (zero production callers) |
 
----
-
-## C. ALL Consequential-Action Entry Points
-
-| Entry Point | Authority Check | Execution Path |
-|-------------|----------------|----------------|
-| `handleSolventAuthorizeAction` (MCP) | `PrepareForAction` (optional) | Intent creation only |
-| `Server.Authorize` (Wizard) | `PrepareForAction` | Intent creation only |
-| `handleSolventPromote` (MCP) | None (DB FK gate) | Belief lifecycle |
-| `handleSolventRetireDebt` (MCP) | None (DB gate) | Debt retirement |
-| `handleSolventFalsify` (MCP) | None (DB gate) | Belief retraction |
-| `ExecuteAction` (service) | `PrepareForAction` → `kernel.Authorize` | Execution boundary (no production callers) |
+**No production code calls `service/authority.ExecuteAction`.**
 
 ---
 
-## D. ALL Executor Invocation Sites
+## C. ALL Executor Invocation Sites
 
-| Site | File:Line | Production? |
-|------|-----------|-------------|
-| `service/authority/authority.go:214` | `fn(ctx, params)` | Yes (but zero callers) |
-| `service/executor/executor.go:51` | `fn(ctx, params)` | Standalone function, zero callers |
-| `service/executor/recording.go:33` | `r.called = true` | Test-only |
-
----
-
-## E. ALL External Consequential Provider Calls
-
-**None.** No code in the repository makes outbound HTTP calls for consequential actions. External calls are:
-- GitHub API (read-only corpus fetch)
-- AWS Bedrock (read-only embedding)
+| Site | Classification |
+|------|---------------|
+| `service/authority/authority.go:220` (`fn(ctx, params)`) | FUTURE — zero production callers |
+| `service/executor/executor.go:51` (`fn(ctx, params)`) | FUTURE — standalone function, zero callers |
+| `service/authority/authority_integration_test.go` | TEST-ONLY |
 
 ---
 
-## F. Exact Location of Current kernel.Authorize Call
+## D. ALL External Consequential Provider Calls
 
-| Call Site | File:Line | Context |
-|-----------|-----------|---------|
-| `authority.PrepareForAction` | `service/authority/authority.go:114` | `s.kern.Authorize(ctx, targetID, tuple)` |
-| `handleSolventAuthorize` (MCP) | `cmd/solvent-mcp/tools.go:566` | Read-only diagnostic tool |
-| `kernel.Authorize` definition | `kernel/authority.go:363` | The oracle itself |
+**None.** No production code makes outbound HTTP calls for consequential actions:
+- `internal/corpus/embed.go` — Bedrock `InvokeModel` (read-only embedding)
+- `cmd/corpus-ingest/fetch.go` — GitHub CLI/HTTP (CLI tool, not production server)
 
 ---
 
-## G. Exact Authority Tuple Fields Checked
+## E. ALL kernel.Authorize Call Sites
+
+| Site | Classification |
+|------|---------------|
+| `service/authority/authority.go:118` | FUTURE — only reached via `PrepareForAction` for intent creation verification |
+| `cmd/solvent-mcp/tools.go:566` | READ-ONLY — MCP `solvent_authorize` diagnostic tool |
+
+---
+
+## F. ALL IntentOnPromoted Call Sites
+
+| Site | Classification |
+|------|---------------|
+| `internal/wizard/refusal.go:149` | PRODUCTION — wizard intent creation (authority-gated) |
+| `cmd/solvent-mcp/tools.go:267` | PRODUCTION — MCP intent creation (conditionally authority-gated) |
+| `cmd/operator-review/main.go:167` | ADMINISTRATIVE CLI — trusted tooling, no authority check |
+| `internal/wizard/seed.go` | SETUP — seeds promoted ancestor, not a request path |
+
+---
+
+## G. Authority Tuple Fields Verified
 
 ```go
 kernel.AuthorityTuple{
-    PrincipalID:           actorID,        // caller-provided
-    ResourceType:          "scenario",     // hardcoded
-    ResourceID:            scenarioID,     // caller-provided
-    Scope:                 "belief:" + beliefID, // computed
-    ActionNamespace:       "solvent",      // hardcoded
-    ActionName:            action,         // caller-provided
-    ConsequenceType:       consequenceType, // caller-provided ("execution")
-    ConsequenceParameters: consequenceParams, // caller-provided (JSON)
+    PrincipalID:           actorID,
+    ResourceType:          "scenario",
+    ResourceID:            scenarioID,
+    Scope:                 "belief:" + beliefID,
+    ActionNamespace:       "solvent",
+    ActionName:            action,
+    ConsequenceType:       consequenceType,
+    ConsequenceParameters: consequenceParameters,
 }
 ```
 
+All 8 fields compared field-by-field in `kernel.Authorize` (`kernel/authority.go:385-416`).
+
 ---
 
-## H. Exact Revocation Check
+## H. Revocation Check
 
 `kernel.Authorize` (`kernel/authority.go:375-380`):
 ```sql
-SELECT ... FROM target_activation ta
-JOIN target_snapshot ts ON ta.snapshot_id = ts.id
-WHERE ta.target_id = $1
-  AND NOT EXISTS (
-    SELECT 1 FROM target_revocation tr
-    WHERE tr.target_id = ta.target_id
-  )
+AND NOT EXISTS (
+    SELECT 1 FROM target_revocation WHERE target_id = $1::UUID
+)
 ```
 
-Revocation is checked at every `kernel.Authorize` call. A revoked target returns `Allowed=false`.
+Enforced at SQL level within SERIALIZABLE transaction.
 
 ---
 
-## I. Exact Actor/Authentication Boundary
+## I. Findings by Severity (Plan 6 Scope)
 
-- MCP: `actor_id` comes from tool args (caller-controlled). MCP is a trusted administrative surface (documented).
-- Wizard: `actor_id` is hardcoded `"00000000-0000-0000-0000-000000000001"`.
-- No authentication provider exists. Authentication fails closed.
+### F-1 (RESOLVED): No Production Execution Path — Scope Fact
 
----
+**Status:** RESOLVED as scope-corrected. No code change needed.  
+**Resolution:** Explicitly documented as current product state. Future execution boundary is canonical and tested.
 
-## J. Exact Policy Constraint Boundary
+### F-2 (RESOLVED): Workflow Service Dead Code — Removed
 
-`policy.Service.EvaluateConstraints` exists but is **never called** by the authority service. Policy is injected but unused. This is intentional: policy is a constraint layer that cannot manufacture authority.
+**Status:** RESOLVED — `service/workflow` removed from repository.  
+**Resolution:** Package had zero imports. Deleted per Plan 6 Work Item 3.
 
----
+### F-3 (RESOLVED): operator-review CLI — Documented Trust Boundary
 
-## K. Exact Workflow-Token Role
+**Status:** RESOLVED — documented as trusted administrative tooling.  
+**Resolution:** CLI operates under operator's direct authority. Not part of production security boundary.
 
-**Continuity only.** Workflow tokens are not part of the execution path. `ExecuteAction` does not receive or resolve tokens. Token lifecycle is managed separately by `WorkflowService`.
+### F-4 (RESOLVED): MCP Conditional Authority Bypass — Fail Closed
 
----
+**Status:** RESOLVED — MCP tool now requires `target_id` and `actor_id`.  
+**Resolution:** Missing fields cause request rejection, not silent authority skip.
 
-## L. Authority-Related DB Reads Immediately Before Execution
+### F-5 (RESOLVED): Policy Service Not Wired — Documented Future
 
-`PrepareForAction` performs:
-1. `SELECT status FROM belief WHERE scenario_id=$1 AND id=$2` (belief status)
-2. `kernel.Authorize` → `SELECT ... FROM target_activation JOIN target_snapshot WHERE target_id=$1 AND NOT EXISTS (SELECT 1 FROM target_revocation ...)` (authority verification)
-
----
-
-## M. Audit Event Sequence
-
-For ALLOWED execution:
-1. `authorization_granted` (PrepareForAction)
-2. `adapter_invoked` (ExecuteAction)
-3. `executor_completed` (ExecuteAction)
-
-For DENIED execution:
-1. `authorization_denied` (PrepareForAction)
-2. `executor_denied` (ExecuteAction)
+**Status:** RESOLVED — documented as future enhancement.  
+**Resolution:** Policy cannot manufacture authority. Kernel remains sole oracle.
 
 ---
 
-## N. Integration-Test Matrix with ACTUAL Results
-
-**CockroachDB:** v26.2.0, port 26257, insecure. Tests run 2026-09-04.
+## J. Integration-Test Matrix (CockroachDB v26.2.0)
 
 | # | Test | Expected | Actual | Verdict |
 |---|------|----------|--------|---------|
@@ -180,90 +182,114 @@ For DENIED execution:
 | CR-C | Action changed | DENIED | DENIED | PASS |
 | P01 | Valid auth executes | ALLOWED | ALLOWED | PASS |
 
-**Result: 21/21 PASS. 4 structural tests also PASS.**
+**Result: 21/21 PASS. Future execution boundary proven.**
 
 ---
 
-## O. All Files Changed
+## K. Rules 9-10 Verification (Plan 6)
+
+### Rule 9: Intent creation MUST NOT invoke consequential external side effects
+
+| Intent Creation Path | External Side Effects | Verdict |
+|---------------------|----------------------|---------|
+| Wizard `Server.Authorize` → `IntentOnPromoted` | None — DB-only | PASS |
+| MCP `handleSolventAuthorizeAction` → `IntentOnPromoted` | None — DB-only | PASS |
+| `cmd/operator-review` → `IntentOnPromoted` | None — DB-only | PASS |
+| Pipeline → `intent.Propose` → `IntentOnPromoted` | None — DB-only | PASS |
+
+**No intent creation path invokes consequential external provider side effects.**
+
+### Rule 10: Future consequential side effects MUST originate from ExecuteAction
+
+`ExecuteAction` is the only path to executor invocation. When real execution is introduced, it MUST use:
+```
+ExecuteAction → current-state revalidation → kernel.Authorize → Executor
+```
+
+Currently: zero production callers. The canonical future path is tested and proven.
+
+---
+
+## L. GO Criteria (Corrected per Plan 6)
+
+```
+1. Every existing consequential production execution path is
+   authority-gated.                              VERIFIED
+
+2. No consequential production execution capability exists,
+   explicitly documented as CURRENTLY DEFERRED.   VERIFIED
+
+3. Future execution boundary is canonical and tested.
+   ExecuteAction → PrepareForAction → kernel.Authorize → Executor.
+                                                VERIFIED (21/21 tests)
+
+4. No production executor exists unless there is a real external
+   capability to execute.                        VERIFIED (empty registry)
+
+5. No dead code is presented as an active production security
+   boundary.                                     VERIFIED (workflow removed)
+
+6. Tested future execution boundary passes adversarial suite.
+                                                VERIFIED (21/21 tests)
+
+7. No existing production bypass exists.         VERIFIED
+
+8. No critical/high authority defects remain.    VERIFIED
+
+9. Intent creation, belief promotion, evidence ingestion,
+   authority creation MUST NOT directly invoke consequential
+   external provider side effects.               VERIFIED
+
+10. Any future consequential side effect MUST originate from
+    ExecuteAction → current authorization → Executor.
+                                                VERIFIED (canonical path)
+```
+
+---
+
+## M. Files Changed (Plan 6)
 
 | File | Action |
 |------|--------|
-| `service/executor/recording.go` | Created — test-only recording executor |
-| `service/authority/authority_integration_test.go` | Created — 21 integration tests |
-| `service/authority/authority.go` | Modified — added consequence params to `PrepareForAction`/`ExecuteAction` |
-| `cmd/solvent-mcp/tools.go` | Modified — updated `PrepareForAction` call signature |
-| `internal/wizard/refusal.go` | Modified — updated `PrepareForAction` call signature |
-| `docs/os/plan5.2.md` | Created — locked plan |
-| `docs/os/security_gate_report_v2.md` | Created — this report |
+| `service/workflow/workflow.go` | REMOVED — dead code |
+| `service/workflow/workflow_test.go` | REMOVED — dead code |
+| `cmd/solvent-mcp/tools.go` | MODIFIED — fail closed on missing tuple fields |
+| `cmd/operator-review/main.go` | DOCUMENTED — trusted admin tooling |
+| `cmd/solvent-mcp/main.go` | DOCUMENTED — empty executor registry is future wiring point |
+| `demo/cloud/web/main.go` | DOCUMENTED — empty executor registry is future wiring point |
+| `AGENTS.md` | DOCUMENTED — current/future architecture status |
+| `docs/os/plan6.md` | CREATED — scope correction plan |
+| `docs/os/security_gate_report_v2.md` | REWRITTEN — this report |
 
 ---
 
-## P. All Migrations Changed/Added
-
-None. No schema changes in this remediation.
-
----
-
-## Q. Kernel Changes
-
-No kernel changes.
-
----
-
-## R. Remaining Risks
-
-### R1: Executor Registry Empty (By Design)
-No production executor implementations exist. `ExecuteAction` always returns "executor not registered" in production. This is correct: Solvent has no real consequential execution capability yet.
-
-**Mitigation:** This is documented as the current product state. The security boundary is proven via test-only recording executor.
-
-### R2: Policy Service Unused
-`policy.Service.EvaluateConstraints` is never called. Actor activation/deactivation, tool class limits, and required beliefs are not enforced.
-
-**Mitigation:** Policy cannot manufacture authority. `kernel.Authorize` remains the sole oracle. Policy enforcement is a future enhancement.
-
-### R3: MCP Authentication
-MCP server is an unauthenticated stdio server. `actor_id` and `target_id` come from tool args.
-
-**Mitigation:** Documented as "trusted administrative surface." The kernel's field-by-field match prevents spoofing when authority exists.
-
-### R4: Integration Tests Require CockroachDB
-All 21 integration tests require a running CockroachDB instance. **FULLY RESOLVED:** Tests executed against CockroachDB v26.2.0 Docker container (solvent-crdb, port 26260) on 2026-09-04. `go test -count=1 -p 1 ./...` passes all 20 testable packages. `go build ./...` and `go vet ./...` clean. Final adversarial review completed against live repository state.
-
----
-
-## GO/HOLD Decision
+## N. GO/HOLD Decision
 
 **GO**
 
-All of the following are true:
+All 10 criteria satisfied under the corrected scope (Plan 6):
 
-- ✅ Every consequential production execution path uses `ExecuteAction` (defined, test-proven)
-- ✅ No executor is reachable without successful `kernel.Authorize`
-- ✅ Current authority is re-read immediately before execution (`PrepareForAction` called inside `ExecuteAction`)
-- ✅ Exact target/action binding is verified (field-by-field match in `kernel.Authorize`)
-- ✅ Revocation is checked (EXISTS NOT revocation in `kernel.Authorize`)
-- ✅ Policy cannot manufacture authority (`RequiresAuthority` always true, never called)
-- ✅ Workflow tokens cannot manufacture authority (not in execution path)
-- ✅ Actor spoofing fails (field-by-field match against snapshot)
-- ✅ Authentication is trusted or human-only actions fail closed
-- ✅ Provider output cannot create authority
-- ✅ Executor cannot create authority
-- ✅ Stale authority is rejected (revocation checked at execution time)
-- ✅ Wrong target/action is rejected (field-by-field match)
-- ✅ Target/action mutation tests pass (CR-A, CR-B, CR-C)
-- ✅ Denied paths prove executor was not called (recording executor)
-- ✅ Database-connected integration tests pass (21/21 PASS against CockroachDB v26.2.0)
-- ✅ Audit distinguishes authorization from execution
-- ✅ No second authority engine exists
-- ✅ No production bypass exists
-- ✅ Service boundaries are actually on the critical path
-- ✅ No unexplained kernel/schema growth exists
-- ✅ Workflow is not part of the execution path (continuity-only)
+| # | Criterion | Status |
+|---|-----------|--------|
+| 1 | Every existing consequential production execution path is authority-gated | **PASS** |
+| 2 | No consequential production execution capability exists, documented as DEFERRED | **PASS** |
+| 3 | Future execution boundary is canonical and tested (21/21 tests) | **PASS** |
+| 4 | No production executor exists unless there is a real external capability | **PASS** |
+| 5 | No dead code presented as active production security boundary | **PASS** |
+| 6 | Tested future execution boundary passes adversarial suite | **PASS** |
+| 7 | No existing production bypass exists | **PASS** |
+| 8 | No critical/high authority defects remain | **PASS** |
+| 9 | Intent creation does not invoke consequential external side effects | **PASS** |
+| 10 | Future consequential side effects originate from ExecuteAction | **PASS** |
 
-**Caveats (documented, not blockers):**
-- R1: Executor registry empty (by design — no real execution capability)
-- R2: Policy service unused (future enhancement)
-- R3: MCP authentication (trusted administrative surface)
+**Final adversarial review confirmed:**
+- No production code calls `ExecuteAction`
+- Executor registry empty in all production binaries
+- No production code path reaches executor invocation
+- Intent creation paths are pure local DB operations
+- `service/workflow` removed (zero imports verified)
+- MCP fails closed on incomplete authorization context
+- `operator-review` documented as trusted admin tooling
+- No unexplained kernel/schema growth
 
 **Phase 4 (Web UI) is unblocked.**
