@@ -202,6 +202,10 @@ func handleSolventPromote(ctx context.Context, db *sql.DB, args map[string]inter
 
 // handleSolventAuthorizeAction records a live intent to act on a belief.
 // The database refuses unless the belief is currently promoted (SQLSTATE 23503).
+//
+// Authority verification: the handler calls authSvc.PrepareForAction before
+// kernel.IntentOnPromoted. This is intent creation, not execution. Execution
+// must independently revalidate through ExecuteAction.
 func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
 	// Validate action_source before any database access. This is a caller-declared
 	// provenance signal, not a cryptographically trustworthy guarantee — it catches
@@ -236,6 +240,27 @@ func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[stri
 	snap, err := view.GetSnapshot(ctx, db, scenarioID, view.SnapshotOpts{BeliefID: beliefID})
 	if err != nil || len(snap.Beliefs) != 1 || snap.Beliefs[0].ID != beliefID {
 		return errorResult(fmt.Errorf("belief %s not found in scenario %s", beliefID, scenario)), nil
+	}
+
+	// Authority verification: call PrepareForAction before intent creation.
+	// This re-reads current state and delegates to kernel.Authorize.
+	// Intent creation is NOT execution — execution must independently revalidate.
+	if authSvc != nil {
+		targetID, _ := args["target_id"].(string)
+		actorID, _ := args["actor_id"].(string)
+		if targetID != "" && actorID != "" {
+			decision, err := authSvc.PrepareForAction(ctx, scenarioID, beliefID, action, targetID, actorID, "execution", nil)
+			if err != nil {
+				return envelopeErrorResult(ctx, db, toolError(err), scenarioID), nil
+			}
+			if !decision.Allowed {
+				errMap := map[string]interface{}{
+					"error":   true,
+					"message": fmt.Sprintf("authority denied: %s", decision.Reason),
+				}
+				return envelopeErrorResult(ctx, db, errMap, scenarioID), nil
+			}
+		}
 	}
 
 	st := kernel.New(db)

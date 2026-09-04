@@ -96,7 +96,7 @@ func newServer(t *testing.T, emb wizard.QueryEmbedder) *wizard.Server {
 		CorpusScenario: testCorpusScenario,
 		Embedder:       emb,
 		TopK:           4,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("wizard.New: %v", err)
 	}

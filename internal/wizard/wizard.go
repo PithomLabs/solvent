@@ -46,6 +46,7 @@ import (
 	"sync"
 
 	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/service/authority"
 )
 
 // DefaultCorpusScenario is the scenario that owns the embedded etcd corpus.
@@ -110,10 +111,13 @@ type Server struct {
 	// does not re-bill and re-wait for identical work. It is not a fallback: a cache
 	// miss with no credentials is still a hard, explicit failure.
 	queries *queryCache
+
+	// authSvc is the authority service, injected for intent creation verification.
+	authSvc *authority.Service
 }
 
 // New builds a Server. db must be non-nil; everything else may be zero.
-func New(db *sql.DB, opts Options) (*Server, error) {
+func New(db *sql.DB, opts Options, authSvc *authority.Service) (*Server, error) {
 	if db == nil {
 		return nil, fmt.Errorf("wizard: nil database")
 	}
@@ -125,6 +129,7 @@ func New(db *sql.DB, opts Options) (*Server, error) {
 		region:  opts.Region,
 		model:   opts.Model,
 		queries: newQueryCache(queryCacheSize),
+		authSvc: authSvc,
 	}
 	if s.corpus == "" {
 		s.corpus = DefaultCorpusScenario

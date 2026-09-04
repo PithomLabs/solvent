@@ -26,6 +26,10 @@ import (
 	"time"
 
 	"github.com/PithomLabs/solvent/internal/wizard"
+	"github.com/PithomLabs/solvent/service/audit"
+	"github.com/PithomLabs/solvent/service/authority"
+	"github.com/PithomLabs/solvent/service/executor"
+	"github.com/PithomLabs/solvent/service/policy"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -75,7 +79,12 @@ func main() {
 	// The wizard owns everything under its own prefix and nothing outside it. It fails
 	// soft: if it cannot be constructed the ledger pages still serve, because a judge
 	// arriving at the recorded URL should never meet a dead site.
-	wiz, err := wizard.New(db, wizard.Options{})
+	policySvc := policy.New(db)
+	auditSvc := audit.New(db)
+	execReg := executor.NewRegistry()
+	authSvc := authority.New(db, policySvc, auditSvc, execReg)
+
+	wiz, err := wizard.New(db, wizard.Options{}, authSvc)
 	if err != nil {
 		log.Printf("wizard unavailable, serving ledger only: %v", err)
 	} else {

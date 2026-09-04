@@ -19,6 +19,10 @@ import (
 	"time"
 
 	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/service/audit"
+	"github.com/PithomLabs/solvent/service/authority"
+	"github.com/PithomLabs/solvent/service/executor"
+	"github.com/PithomLabs/solvent/service/policy"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -33,6 +37,9 @@ var (
 
 	// log is the structured logger writing to stderr.
 	log *slog.Logger
+
+	// authSvc is the authority service, initialized after DB connection.
+	authSvc *authority.Service
 )
 
 func main() {
@@ -104,6 +111,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "schema: %v\n", err)
 		os.Exit(1)
 	}
+
+	// 8. Initialize services.
+	policySvc := policy.New(db)
+	auditSvc := audit.New(db)
+	execReg := executor.NewRegistry()
+	authSvc = authority.New(db, policySvc, auditSvc, execReg)
 
 	log.Info("solvent-mcp starting",
 		"version", "v0.1.0",

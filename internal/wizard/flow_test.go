@@ -549,7 +549,7 @@ func TestW13b_SearchWithoutCredentialsFailsExplicitly(t *testing.T) {
 		CorpusScenario: testCorpusScenario,
 		Region:         "us-west-2",
 		Model:          "amazon.titan-embed-text-v2:0",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("wizard.New: %v", err)
 	}

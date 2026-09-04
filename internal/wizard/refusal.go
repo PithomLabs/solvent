@@ -127,8 +127,25 @@ func (s *Server) Promote(ctx context.Context, scenarioID, beliefID string) Verdi
 // Authorize attempts to record intent on the belief, and reports what came back.
 //
 // Same discipline as Promote: no precondition, one call site, the composite gate FK
-// does the refusing.
+// does the refusing. Authority verification is performed before intent creation via
+// the authority service, if available.
 func (s *Server) Authorize(ctx context.Context, scenarioID, beliefID string) Verdict {
+	// Authority verification: call PrepareForAction before intent creation.
+	// This re-reads current state and delegates to kernel.Authorize.
+	// Intent creation is NOT execution — execution must independently revalidate.
+	if s.authSvc != nil {
+		targetID := "00000000-0000-0000-0000-000000000001"
+		actorID := "00000000-0000-0000-0000-000000000001"
+		decision, err := s.authSvc.PrepareForAction(ctx, scenarioID, beliefID, DeployAction, targetID, actorID, "execution", nil)
+		if err != nil {
+			return s.refuse(ctx, scenarioID, StmtAuthorize, err, "authority_verification_failed")
+		}
+		if !decision.Allowed {
+			return s.refuse(ctx, scenarioID, StmtAuthorize,
+				fmt.Errorf("authority denied: %s", decision.Reason), "authority_denied")
+		}
+	}
+
 	if err := s.kern.IntentOnPromoted(ctx, scenarioID, beliefID, DeployAction); err != nil {
 		return s.refuse(ctx, scenarioID, StmtAuthorize, err, "")
 	}
