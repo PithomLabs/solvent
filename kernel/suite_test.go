@@ -24,7 +24,15 @@ const (
 // 002 carries the corpus layer. The kernel suite does not use the corpus tables,
 // but applying both files everywhere keeps one schema shape across every
 // environment rather than letting it vary by entry point.
-var schemaPaths = []string{"../db/001_schema.sql", "../db/002_corpus.sql", "../db/003_wizard.sql", "../db/004_debt_vocabulary.sql", "../db/005_authority_mvp.sql", "../db/006_authority_justification_cascade.sql"}
+var schemaPaths = []string{
+	"../db/001_schema.sql",
+	"../db/002_corpus.sql",
+	"../db/003_wizard.sql",
+	"../db/004_debt_vocabulary.sql",
+	"../db/005_authority_mvp.sql",
+	"../db/006_authority_justification_cascade.sql",
+	"../db/007_service_tables.sql",
+}
 
 var (
 	dsn    string
@@ -35,7 +43,7 @@ var (
 // TestMain resets the behavioral database, runs the suite, and writes the receipts.
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dsn = testdb.DSN()
+	dsn = testdb.SuiteDSN("kernel")
 
 	name, _ := testdb.DBNameFromDSN(dsn)
 	testdb.AcquireResetLock(name)

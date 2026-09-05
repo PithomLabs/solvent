@@ -19,9 +19,15 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// 002 carries the corpus layer. Applied everywhere so every environment has one
-// schema shape; these packages do not use the corpus tables themselves.
-var schemaPaths = []string{"../../db/001_schema.sql", "../../db/002_corpus.sql", "../../db/003_wizard.sql", "../../db/004_debt_vocabulary.sql"}
+var schemaPaths = []string{
+	"../../db/001_schema.sql",
+	"../../db/002_corpus.sql",
+	"../../db/003_wizard.sql",
+	"../../db/004_debt_vocabulary.sql",
+	"../../db/005_authority_mvp.sql",
+	"../../db/006_authority_justification_cascade.sql",
+	"../../db/007_service_tables.sql",
+}
 
 var (
 	dsn    string
@@ -30,7 +36,7 @@ var (
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dsn = testdb.DSN()
+	dsn = testdb.SuiteDSN("belief")
 
 	name, _ := testdb.DBNameFromDSN(dsn)
 	testdb.AcquireResetLock(name)

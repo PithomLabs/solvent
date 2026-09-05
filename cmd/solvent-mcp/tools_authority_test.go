@@ -13,6 +13,7 @@ import (
 	"github.com/PithomLabs/solvent/service/audit"
 	"github.com/PithomLabs/solvent/service/authority"
 	"github.com/PithomLabs/solvent/service/executor"
+	"github.com/PithomLabs/solvent/service/ledger"
 	"github.com/PithomLabs/solvent/service/policy"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -21,7 +22,7 @@ var sharedDB *sql.DB
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dsn := testdb.DSN()
+	dsn := testdb.SuiteDSN("mcp")
 
 	name, _ := testdb.DBNameFromDSN(dsn)
 	testdb.AcquireResetLock(name)
@@ -33,6 +34,7 @@ func TestMain(m *testing.M) {
 		"../../db/004_debt_vocabulary.sql",
 		"../../db/005_authority_mvp.sql",
 		"../../db/006_authority_justification_cascade.sql",
+		"../../db/007_service_tables.sql",
 	}
 	if err := testdb.Reset(ctx, dsn, schemaPaths...); err != nil {
 		fmt.Fprintf(os.Stderr, "solvent-mcp cannot start: %v\n", err)
@@ -46,6 +48,12 @@ func TestMain(m *testing.M) {
 		testdb.ReleaseResetLock(name)
 		os.Exit(1)
 	}
+
+	pol := policy.New(sharedDB)
+	aud := audit.New(sharedDB)
+	reg := executor.NewRegistry()
+	authSvc = authority.New(sharedDB, pol, aud, reg)
+	ledgerSvc = ledger.New(sharedDB, aud)
 
 	code := m.Run()
 

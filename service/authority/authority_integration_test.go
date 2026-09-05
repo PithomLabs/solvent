@@ -45,7 +45,7 @@ var schemaPaths = []string{
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dsn = testdb.DSN()
+	dsn = testdb.SuiteDSN("authority")
 
 	name, _ := testdb.DBNameFromDSN(dsn)
 	testdb.AcquireResetLock(name)

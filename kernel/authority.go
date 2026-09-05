@@ -27,8 +27,9 @@ type AuthorityTuple struct {
 
 // AuthorizeResult is the read-only authority verification outcome.
 type AuthorizeResult struct {
-	Allowed bool
-	Reason  string
+	Allowed     bool
+	Reason      string
+	IntentState string // populated by AuthorizeAndCreateIntent on success
 }
 
 // authorityTarget is the internal representation of an authority_target row.
@@ -355,6 +356,79 @@ func (s *Store) Approve(ctx context.Context, targetID, approverPrincipalID strin
 	})
 }
 
+// authorizeWithinTx evaluates current authority within an existing transaction.
+// It is the single implementation of authority semantics used by both Authorize
+// (standalone) and AuthorizeAndCreateIntent (composite).
+//
+// This function performs zero writes. It reads target_activation, target_snapshot,
+// and the absence of target_revocation, then compares the presented tuple against
+// the snapshot.
+func authorizeWithinTx(ctx context.Context, tx *sql.Tx, targetID string, tuple AuthorityTuple) (AuthorizeResult, error) {
+	// Resolve authority: activation + snapshot + no revocation.
+	var (
+		snapPrincipalID, snapResourceType, snapResourceID string
+		snapScope, snapActionNamespace, snapActionName    string
+		snapConsequenceType                               string
+		snapConsequenceParams                             []byte
+		justSetJSON                                       []byte
+	)
+	if err := tx.QueryRowContext(ctx, sqlAuthorizeResolve, targetID).Scan(
+		&snapPrincipalID, &snapResourceType, &snapResourceID, &snapScope,
+		&snapActionNamespace, &snapActionName, &snapConsequenceType, &snapConsequenceParams,
+		&justSetJSON,
+	); err != nil {
+		return AuthorizeResult{Allowed: false, Reason: "no activation or revocation exists"}, nil
+	}
+
+	// Compare presented tuple field-by-field with snapshot.
+	if tuple.PrincipalID != snapPrincipalID {
+		return AuthorizeResult{Allowed: false, Reason: "principal mismatch"}, nil
+	}
+	if tuple.ResourceType != snapResourceType {
+		return AuthorizeResult{Allowed: false, Reason: "resource_type mismatch"}, nil
+	}
+	if tuple.ResourceID != snapResourceID {
+		return AuthorizeResult{Allowed: false, Reason: "resource_id mismatch"}, nil
+	}
+	if tuple.Scope != snapScope {
+		return AuthorizeResult{Allowed: false, Reason: "scope mismatch"}, nil
+	}
+	if tuple.ActionNamespace != snapActionNamespace {
+		return AuthorizeResult{Allowed: false, Reason: "action_namespace mismatch"}, nil
+	}
+	if tuple.ActionName != snapActionName {
+		return AuthorizeResult{Allowed: false, Reason: "action_name mismatch"}, nil
+	}
+	if tuple.ConsequenceType != snapConsequenceType {
+		return AuthorizeResult{Allowed: false, Reason: "consequence_type mismatch"}, nil
+	}
+	if !jsonEqual(tuple.ConsequenceParameters, snapConsequenceParams) {
+		return AuthorizeResult{Allowed: false, Reason: "consequence_parameters mismatch"}, nil
+	}
+
+	// Verify each justification's belief is currently promoted.
+	var justs []struct {
+		BeliefID     string `json:"belief_id"`
+		BeliefStatus string `json:"belief_status"`
+	}
+	if err := json.Unmarshal(justSetJSON, &justs); err != nil {
+		return AuthorizeResult{Allowed: false, Reason: "justification_set parse failure"}, nil
+	}
+	for _, j := range justs {
+		var status string
+		if err := tx.QueryRowContext(ctx,
+			`SELECT status FROM belief WHERE id = $1::UUID`, j.BeliefID).
+			Scan(&status); err != nil {
+			return AuthorizeResult{Allowed: false, Reason: "belief not found: " + j.BeliefID}, nil
+		}
+		if status != "promoted" {
+			return AuthorizeResult{Allowed: false, Reason: "belief " + j.BeliefID + " not promoted"}, nil
+		}
+	}
+
+	return AuthorizeResult{Allowed: true, Reason: ""}, nil
+}
+
 // Authorize is READ-ONLY. It verifies existing authority without creating
 // authority. It reads target_activation, target_snapshot, and the absence of
 // target_revocation, then compares the presented tuple against the snapshot.
@@ -362,83 +436,57 @@ func (s *Store) Approve(ctx context.Context, targetID, approverPrincipalID strin
 // Authorize performs zero writes against the authority tables.
 func (s *Store) Authorize(ctx context.Context, targetID string, tuple AuthorityTuple) (AuthorizeResult, error) {
 	var result AuthorizeResult
-
 	err := crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
-		// Resolve authority: activation + snapshot + no revocation.
-		var (
-			snapPrincipalID, snapResourceType, snapResourceID string
-			snapScope, snapActionNamespace, snapActionName    string
-			snapConsequenceType                               string
-			snapConsequenceParams                             []byte
-			justSetJSON                                       []byte
-		)
-		if err := tx.QueryRowContext(ctx, sqlAuthorizeResolve, targetID).Scan(
-			&snapPrincipalID, &snapResourceType, &snapResourceID, &snapScope,
-			&snapActionNamespace, &snapActionName, &snapConsequenceType, &snapConsequenceParams,
-			&justSetJSON,
-		); err != nil {
-			result = AuthorizeResult{Allowed: false, Reason: "no activation or revocation exists"}
-			return nil
+		var err error
+		result, err = authorizeWithinTx(ctx, tx, targetID, tuple)
+		return err
+	})
+	if err != nil {
+		return AuthorizeResult{}, err
+	}
+	return result, nil
+}
+
+// AuthorizeAndCreateIntent evaluates current authority and creates a live
+// action intent inside ONE SERIALIZABLE transaction.
+//
+// Security guarantee: if authority is revoked between the authority evaluation
+// and the intent creation, CockroachDB SERIALIZABLE isolation causes the
+// transaction to abort or retry. A live intent can never be committed on
+// superseded authority.
+//
+// This method exists because the state transition "verify authority + create
+// intent" has security semantics that cannot safely be split across independent
+// transactions. The kernel is the sole authority oracle — this method does not
+// introduce a second authority engine; it composes the existing authority
+// evaluation with intent creation in one atomic boundary.
+//
+// The existing Authorize and IntentOnPromoted methods remain available for
+// callers that do not need the composite guarantee.
+func (s *Store) AuthorizeAndCreateIntent(
+	ctx context.Context,
+	targetID string,
+	tuple AuthorityTuple,
+	scenarioID, beliefID, action string,
+) (AuthorizeResult, error) {
+	var result AuthorizeResult
+	err := crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
+		// 1. Evaluate authority (reuses authorizeWithinTx — one authority implementation).
+		var err error
+		result, err = authorizeWithinTx(ctx, tx, targetID, tuple)
+		if err != nil {
+			return err
+		}
+		if !result.Allowed {
+			return nil // denial is communicated via result, not error
 		}
 
-		// Compare presented tuple field-by-field with snapshot.
-		if tuple.PrincipalID != snapPrincipalID {
-			result = AuthorizeResult{Allowed: false, Reason: "principal mismatch"}
-			return nil
-		}
-		if tuple.ResourceType != snapResourceType {
-			result = AuthorizeResult{Allowed: false, Reason: "resource_type mismatch"}
-			return nil
-		}
-		if tuple.ResourceID != snapResourceID {
-			result = AuthorizeResult{Allowed: false, Reason: "resource_id mismatch"}
-			return nil
-		}
-		if tuple.Scope != snapScope {
-			result = AuthorizeResult{Allowed: false, Reason: "scope mismatch"}
-			return nil
-		}
-		if tuple.ActionNamespace != snapActionNamespace {
-			result = AuthorizeResult{Allowed: false, Reason: "action_namespace mismatch"}
-			return nil
-		}
-		if tuple.ActionName != snapActionName {
-			result = AuthorizeResult{Allowed: false, Reason: "action_name mismatch"}
-			return nil
-		}
-		if tuple.ConsequenceType != snapConsequenceType {
-			result = AuthorizeResult{Allowed: false, Reason: "consequence_type mismatch"}
-			return nil
-		}
-		if !jsonEqual(tuple.ConsequenceParameters, snapConsequenceParams) {
-			result = AuthorizeResult{Allowed: false, Reason: "consequence_parameters mismatch"}
-			return nil
+		// 2. Create intent (reuses createIntentWithinTx — one intent implementation).
+		if err := createIntentWithinTx(ctx, tx, scenarioID, beliefID, action); err != nil {
+			return err
 		}
 
-		// Verify each justification's belief is currently promoted.
-		var justs []struct {
-			BeliefID     string `json:"belief_id"`
-			BeliefStatus string `json:"belief_status"`
-		}
-		if err := json.Unmarshal(justSetJSON, &justs); err != nil {
-			result = AuthorizeResult{Allowed: false, Reason: "justification_set parse failure"}
-			return nil
-		}
-		for _, j := range justs {
-			var status string
-			if err := tx.QueryRowContext(ctx,
-				`SELECT status FROM belief WHERE id = $1::UUID`, j.BeliefID).
-				Scan(&status); err != nil {
-				result = AuthorizeResult{Allowed: false, Reason: "belief not found: " + j.BeliefID}
-				return nil
-			}
-			if status != "promoted" {
-				result = AuthorizeResult{Allowed: false, Reason: "belief " + j.BeliefID + " not promoted"}
-				return nil
-			}
-		}
-
-		result = AuthorizeResult{Allowed: true, Reason: ""}
+		result.IntentState = "live"
 		return nil
 	})
 	if err != nil {

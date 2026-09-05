@@ -18,11 +18,14 @@ import (
 	"github.com/PithomLabs/solvent/kernel"
 )
 
-// 003 alters a 002 table, so all three are applied in order.
 var schemaPaths = []string{
 	"../../db/001_schema.sql",
 	"../../db/002_corpus.sql",
-	"../../db/003_wizard.sql", "../../db/004_debt_vocabulary.sql",
+	"../../db/003_wizard.sql",
+	"../../db/004_debt_vocabulary.sql",
+	"../../db/005_authority_mvp.sql",
+	"../../db/006_authority_justification_cascade.sql",
+	"../../db/007_service_tables.sql",
 }
 
 // Scenario namespace. 1111..6666 belong to the kernel/belief/intent/pipeline suites,
@@ -36,7 +39,7 @@ var shared *sql.DB
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dsn := testdb.DSN()
+	dsn := testdb.SuiteDSN("wizard")
 
 	name, _ := testdb.DBNameFromDSN(dsn)
 	testdb.AcquireResetLock(name)

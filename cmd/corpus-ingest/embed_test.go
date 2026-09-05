@@ -18,7 +18,15 @@ import (
 )
 
 // The corpus layer references belief(id), so the frozen DDL is applied first.
-var embedSchemaPaths = []string{"../../db/001_schema.sql", "../../db/002_corpus.sql", "../../db/003_wizard.sql", "../../db/004_debt_vocabulary.sql"}
+var embedSchemaPaths = []string{
+	"../../db/001_schema.sql",
+	"../../db/002_corpus.sql",
+	"../../db/003_wizard.sql",
+	"../../db/004_debt_vocabulary.sql",
+	"../../db/005_authority_mvp.sql",
+	"../../db/006_authority_justification_cascade.sql",
+	"../../db/007_service_tables.sql",
+}
 
 // Scenario namespace for this suite. 8888/9999/aaaa belong to internal/corpus;
 // bbbb is claimed here so the two suites cannot see each other's rows.
@@ -28,7 +36,7 @@ var embedDB *sql.DB
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dsn := testdb.DSN()
+	dsn := testdb.SuiteDSN("ingest")
 
 	name, _ := testdb.DBNameFromDSN(dsn)
 	testdb.AcquireResetLock(name)

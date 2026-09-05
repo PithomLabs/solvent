@@ -21,10 +21,18 @@ var (
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dsnExplain = testdb.DSN()
+	dsnExplain = testdb.SuiteDSN("view")
 	name, _ := testdb.DBNameFromDSN(dsnExplain)
 	testdb.AcquireResetLock(name)
-	schemaPaths := []string{"../../db/001_schema.sql", "../../db/002_corpus.sql", "../../db/003_wizard.sql", "../../db/004_debt_vocabulary.sql"}
+	schemaPaths := []string{
+		"../../db/001_schema.sql",
+		"../../db/002_corpus.sql",
+		"../../db/003_wizard.sql",
+		"../../db/004_debt_vocabulary.sql",
+		"../../db/005_authority_mvp.sql",
+		"../../db/006_authority_justification_cascade.sql",
+		"../../db/007_service_tables.sql",
+	}
 	if err := testdb.Reset(ctx, dsnExplain, schemaPaths...); err != nil {
 		fmt.Fprintf(os.Stderr, "view explain tests cannot start: %v\n", err)
 		testdb.ReleaseResetLock(name)

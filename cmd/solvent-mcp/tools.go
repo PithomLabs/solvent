@@ -203,17 +203,10 @@ func handleSolventPromote(ctx context.Context, db *sql.DB, args map[string]inter
 // handleSolventAuthorizeAction records a live intent to act on a belief.
 // The database refuses unless the belief is currently promoted (SQLSTATE 23503).
 //
-// Authority verification: the handler calls authSvc.PrepareForAction before
-// kernel.IntentOnPromoted. This is intent creation, not execution. Execution
-// must independently revalidate through ExecuteAction.
+// MCP trust boundary: this is a stdio-based local process. The actor_id comes
+// from the tool arguments, not from authenticated credentials. Authority is
+// enforced by the target/snapshot approval workflow, not by caller identity.
 func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
-	// Validate action_source before any database access. This is a caller-declared
-	// provenance signal, not a cryptographically trustworthy guarantee — it catches
-	// honest misuse but cannot prove that an adversarial agent actually received the
-	// action from a human. The database gate remains the real security boundary.
-	//
-	// Errors here use errorResult (no audit envelope, no AuditIntent, no DB read)
-	// so the absence of the envelope is the observable fingerprint of the DB-free path.
 	actionSource, _ := args["action_source"].(string)
 	switch actionSource {
 	case "tool_output":
@@ -230,6 +223,12 @@ func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[stri
 	}
 	scenario, _ := args["scenario"].(string)
 	action, _ := args["action"].(string)
+	targetID, _ := args["target_id"].(string)
+	actorID, _ := args["actor_id"].(string)
+
+	if targetID == "" || actorID == "" {
+		return errorResult(fmt.Errorf("target_id and actor_id are required for authority verification")), nil
+	}
 
 	scenarioID, ok := lookupScenario(scenario)
 	if !ok {
@@ -242,32 +241,31 @@ func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[stri
 		return errorResult(fmt.Errorf("belief %s not found in scenario %s", beliefID, scenario)), nil
 	}
 
-	// Authority verification: call PrepareForAction before intent creation.
-	// This re-reads current state and delegates to kernel.Authorize.
-	// Intent creation is NOT execution — execution must independently revalidate.
-	// Incomplete authorization context (missing target_id or actor_id) fails closed.
-	if authSvc != nil {
-		targetID, _ := args["target_id"].(string)
-		actorID, _ := args["actor_id"].(string)
-		if targetID == "" || actorID == "" {
-			return errorResult(fmt.Errorf("target_id and actor_id are required for authority verification")), nil
-		}
-		decision, err := authSvc.PrepareForAction(ctx, scenarioID, beliefID, action, targetID, actorID, "execution", []byte("{}"))
-		if err != nil {
-			return envelopeErrorResult(ctx, db, toolError(err), scenarioID), nil
-		}
-		if !decision.Allowed {
-			errMap := map[string]interface{}{
-				"error":   true,
-				"message": fmt.Sprintf("authority denied: %s", decision.Reason),
-			}
-			return envelopeErrorResult(ctx, db, errMap, scenarioID), nil
-		}
+	// Atomic authorization + intent creation. Authority evaluation and intent
+	// creation occur in one SERIALIZABLE transaction — no race window between
+	// verification and creation. This replaces the previous two-step path.
+	tuple := kernel.AuthorityTuple{
+		PrincipalID:           actorID,
+		ResourceType:          "scenario",
+		ResourceID:            scenarioID,
+		Scope:                 "belief:" + beliefID,
+		ActionNamespace:       "solvent",
+		ActionName:            action,
+		ConsequenceType:       "execution",
+		ConsequenceParameters: []byte("{}"),
 	}
 
-	st := kernel.New(db)
-	if err := st.IntentOnPromoted(ctx, scenarioID, beliefID, action); err != nil {
+	decision, err := ledgerSvc.AuthorizeAndCreateIntent(ctx, scenarioID, beliefID, action, targetID, actorID, tuple)
+	if err != nil {
 		return envelopeErrorResult(ctx, db, toolError(err), scenarioID), nil
+	}
+
+	if !decision.Allowed {
+		errMap := map[string]interface{}{
+			"error":   true,
+			"message": fmt.Sprintf("authority denied: %s", decision.Reason),
+		}
+		return envelopeErrorResult(ctx, db, errMap, scenarioID), nil
 	}
 
 	audit, err := pipeline.AuditIntent(ctx, db, scenarioID)
@@ -277,7 +275,7 @@ func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[stri
 
 	return envelopeResult(db, map[string]interface{}{
 		"belief_id":    beliefID,
-		"intent_state": "live",
+		"intent_state": decision.IntentState,
 		"action":       action,
 	}, audit), nil
 }

@@ -106,10 +106,17 @@ func (s *Store) Promote(ctx context.Context, beliefID string) error {
 	})
 }
 
+// createIntentWithinTx creates a live action intent within an existing transaction.
+// It is the single implementation of intent creation used by both IntentOnPromoted
+// (standalone) and AuthorizeAndCreateIntent (composite).
+func createIntentWithinTx(ctx context.Context, tx *sql.Tx, scenarioID, beliefID, action string) error {
+	_, err := tx.ExecContext(ctx, sqlIntentOnPromoted, scenarioID, beliefID, action)
+	return wrapIf(sqlStateFKViolation, ErrActionOnUnpromoted, err)
+}
+
 // IntentOnPromoted records intent to act on a belief.
 //
 // The composite FK (belief_id, 'promoted') -> belief(id, status) physically refuses
-// IntentOnPromoted records a live action intent. The database refuses
 // this unless the belief is currently promoted (I-3). A 23503 refusal is named
 // ErrActionOnUnpromoted with the driver error preserved underneath.
 //
@@ -120,8 +127,7 @@ func (s *Store) Promote(ctx context.Context, beliefID string) error {
 // on the intent tuple, which changes the frozen schema.
 func (s *Store) IntentOnPromoted(ctx context.Context, scenarioID, beliefID, action string) error {
 	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, sqlIntentOnPromoted, scenarioID, beliefID, action)
-		return wrapIf(sqlStateFKViolation, ErrActionOnUnpromoted, err)
+		return createIntentWithinTx(ctx, tx, scenarioID, beliefID, action)
 	})
 }
 

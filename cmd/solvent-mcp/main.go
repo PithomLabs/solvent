@@ -22,6 +22,7 @@ import (
 	"github.com/PithomLabs/solvent/service/audit"
 	"github.com/PithomLabs/solvent/service/authority"
 	"github.com/PithomLabs/solvent/service/executor"
+	"github.com/PithomLabs/solvent/service/ledger"
 	"github.com/PithomLabs/solvent/service/policy"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -40,6 +41,9 @@ var (
 
 	// authSvc is the authority service, initialized after DB connection.
 	authSvc *authority.Service
+
+	// ledgerSvc is the API ledger service, initialized after DB connection.
+	ledgerSvc *ledger.Service
 )
 
 func main() {
@@ -121,6 +125,7 @@ func main() {
 	// reachable via ExecuteAction → kernel.Authorize → Executor.
 	execReg := executor.NewRegistry()
 	authSvc = authority.New(db, policySvc, auditSvc, execReg)
+	ledgerSvc = ledger.New(db, auditSvc)
 
 	log.Info("solvent-mcp starting",
 		"version", "v0.1.0",

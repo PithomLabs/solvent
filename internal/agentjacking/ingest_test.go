@@ -20,11 +20,14 @@ var schemaPaths = []string{
 	"../../db/002_corpus.sql",
 	"../../db/003_wizard.sql",
 	"../../db/004_debt_vocabulary.sql",
+	"../../db/005_authority_mvp.sql",
+	"../../db/006_authority_justification_cascade.sql",
+	"../../db/007_service_tables.sql",
 }
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
-	dsn := testdb.DSN()
+	dsn := testdb.SuiteDSN("agentjacking")
 
 	name, _ := testdb.DBNameFromDSN(dsn)
 	testdb.AcquireResetLock(name)

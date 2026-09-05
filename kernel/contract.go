@@ -31,6 +31,7 @@ type Contract interface {
 	RequestAuthorization(context.Context, string, string) error
 	Approve(context.Context, string, string) error
 	Authorize(context.Context, string, AuthorityTuple) (AuthorizeResult, error)
+	AuthorizeAndCreateIntent(context.Context, string, AuthorityTuple, string, string, string) (AuthorizeResult, error)
 	RevokeTarget(context.Context, string, string, string) error
 	Discharge(context.Context, string, string, string, string) error
 }

@@ -33,6 +33,20 @@ func DSN() string {
 	return DefaultDSN
 }
 
+// SuiteDSN returns a DSN for an isolated per-package test database.
+// The database name fable_<suiteName>_test ends in _test, so the Reset safety
+// guard accepts it. Each package gets its own database, eliminating
+// cross-package destructive resets under go test ./... parallelism.
+func SuiteDSN(suiteName string) string {
+	base := DSN()
+	u, err := url.Parse(base)
+	if err != nil {
+		return "postgresql://root@localhost:26260/fable_" + suiteName + "_test?sslmode=disable"
+	}
+	u.Path = "/fable_" + suiteName + "_test"
+	return u.String()
+}
+
 // DBName extracts the database name from a DSN.
 func DBName(dsn string) (string, error) {
 	u, err := url.Parse(dsn)

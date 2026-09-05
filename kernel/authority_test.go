@@ -1479,6 +1479,138 @@ func TestTP3_SnapshotSubstitutionFK(t *testing.T) {
 	})
 }
 
+// --- AuthorizeAndCreateIntent tests ---
+
+// T-30: AuthorizeAndCreateIntent with exact tuple = ALLOW + intent created.
+func TestT30_AuthorizeAndCreateIntentExactTuple(t *testing.T) {
+	rec.begin("auth")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := authScenario(30)
+
+	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
+	targetID := createTestTarget(t, ctx, st, principal, principal)
+	beliefID := mustPromoted(t, ctx, st, sc, "belief for authorize-and-create-intent exact")
+	_ = st.AttachJustification(ctx, targetID, beliefID, "promoted", principal)
+	_ = st.RequestAuthorization(ctx, targetID, principal)
+	_ = st.Approve(ctx, targetID, principal)
+
+	result, err := st.AuthorizeAndCreateIntent(ctx, targetID, defaultTuple(principal), sc, beliefID, "deploy test")
+
+	ok := err == nil && result.Allowed && result.IntentState == "live"
+	rec.check(t, ok, Case{
+		ID: "T-30", Wave: "auth",
+		Purpose:   "AuthorizeAndCreateIntent with exact tuple creates live intent",
+		Expected:  "Allowed=true, IntentState=live",
+		Observed:  fmt.Sprintf("allowed=%t, intent_state=%q, reason=%q", result.Allowed, result.IntentState, result.Reason),
+		Invariant: "Atomic authority + intent creation succeeds",
+		Receipt:   receiptOf(err),
+	})
+}
+
+// T-31: AuthorizeAndCreateIntent with wrong principal = DENY + no intent.
+func TestT31_AuthorizeAndCreateIntentPrincipalMismatch(t *testing.T) {
+	rec.begin("auth")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := authScenario(31)
+
+	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
+	targetID := createTestTarget(t, ctx, st, principal, principal)
+	beliefID := mustPromoted(t, ctx, st, sc, "belief for authorize-and-create-intent mismatch")
+	_ = st.AttachJustification(ctx, targetID, beliefID, "promoted", principal)
+	_ = st.RequestAuthorization(ctx, targetID, principal)
+	_ = st.Approve(ctx, targetID, principal)
+
+	tuple := defaultTuple(principal)
+	tuple.PrincipalID = "00000000-0000-0000-0000-999999999999"
+	result, err := st.AuthorizeAndCreateIntent(ctx, targetID, tuple, sc, beliefID, "deploy test")
+
+	// Verify no intent was created.
+	var intentCnt int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM action_intent WHERE scenario_id = $1::UUID AND belief_id = $2::UUID`,
+		sc, beliefID).Scan(&intentCnt)
+
+	ok := err == nil && !result.Allowed && result.Reason == "principal mismatch" && intentCnt == 0
+	rec.check(t, ok, Case{
+		ID: "T-31", Wave: "auth",
+		Purpose:   "AuthorizeAndCreateIntent with wrong principal denies and creates no intent",
+		Expected:  "Allowed=false, reason=principal mismatch, 0 intents",
+		Observed:  fmt.Sprintf("allowed=%t, reason=%q, intents=%d", result.Allowed, result.Reason, intentCnt),
+		Invariant: "Tuple mismatch denied atomically",
+		Receipt:   receiptOf(err),
+	})
+}
+
+// T-32: AuthorizeAndCreateIntent with revoked target = DENY + no intent.
+func TestT32_AuthorizeAndCreateIntentRevokedTarget(t *testing.T) {
+	rec.begin("auth")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := authScenario(32)
+
+	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
+	targetID := createTestTarget(t, ctx, st, principal, principal)
+	beliefID := mustPromoted(t, ctx, st, sc, "belief for authorize-and-create-intent revoked")
+	_ = st.AttachJustification(ctx, targetID, beliefID, "promoted", principal)
+	_ = st.RequestAuthorization(ctx, targetID, principal)
+	_ = st.Approve(ctx, targetID, principal)
+	_ = st.RevokeTarget(ctx, targetID, principal, "test revocation")
+
+	result, err := st.AuthorizeAndCreateIntent(ctx, targetID, defaultTuple(principal), sc, beliefID, "deploy test")
+
+	var intentCnt int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM action_intent WHERE scenario_id = $1::UUID AND belief_id = $2::UUID`,
+		sc, beliefID).Scan(&intentCnt)
+
+	ok := err == nil && !result.Allowed && intentCnt == 0
+	rec.check(t, ok, Case{
+		ID: "T-32", Wave: "auth",
+		Purpose:   "AuthorizeAndCreateIntent with revoked target denies and creates no intent",
+		Expected:  "Allowed=false, 0 intents",
+		Observed:  fmt.Sprintf("allowed=%t, reason=%q, intents=%d", result.Allowed, result.Reason, intentCnt),
+		Invariant: "Revoked authority blocks atomic intent creation",
+		Receipt:   receiptOf(err),
+	})
+}
+
+// T-33: AuthorizeAndCreateIntent with unpromoted belief = FK error (no intent).
+func TestT33_AuthorizeAndCreateIntentUnpromotedBelief(t *testing.T) {
+	rec.begin("auth")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := authScenario(33)
+
+	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
+	targetID := createTestTarget(t, ctx, st, principal, principal)
+	beliefID := mustPromoted(t, ctx, st, sc, "belief for authorize-and-create-intent unpromoted")
+	_ = st.AttachJustification(ctx, targetID, beliefID, "promoted", principal)
+	_ = st.RequestAuthorization(ctx, targetID, principal)
+	_ = st.Approve(ctx, targetID, principal)
+
+	// Retract the belief so it's no longer promoted.
+	_, _ = st.RetractCascade(ctx, sc, beliefID)
+
+	result, err := st.AuthorizeAndCreateIntent(ctx, targetID, defaultTuple(principal), sc, beliefID, "deploy test")
+
+	// The authority check may pass (if snapshot still resolves), but intent creation
+	// fails with FK violation because belief is no longer promoted.
+	// Or authority check fails because justification belief is no longer promoted.
+	isAuthDenial := err == nil && !result.Allowed
+	isFKError := err != nil && sqlStateOf(err) == "23503"
+	ok := isAuthDenial || isFKError
+	rec.check(t, ok, Case{
+		ID: "T-33", Wave: "auth",
+		Purpose:   "AuthorizeAndCreateIntent with unpromoted belief fails atomically",
+		Expected:  "auth denial or FK violation, no live intent",
+		Observed:  fmt.Sprintf("allowed=%t, reason=%q, err=%v", result.Allowed, result.Reason, err),
+		Invariant: "Unpromoted belief cannot produce live intent",
+		Receipt:   receiptOf(err),
+	})
+}
+
 // --- targetState reads the lifecycle state from DB facts ---
 
 func targetState(t *testing.T, ctx context.Context, targetID string) (string, error) {
