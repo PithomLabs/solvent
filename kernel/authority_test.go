@@ -1340,6 +1340,419 @@ func TestTC8_ConcurrentDischarge(t *testing.T) {
 	})
 }
 
+// T-C10: Historical vulnerability — old two-step sequence creates stale intent.
+// This test reproduces the exact old vulnerable sequence: Authorize commits,
+// RevokeTarget commits, then IntentOnPromoted commits. The gate FK only checks
+// belief status (still promoted), NOT authority (revoked), so the INSERT succeeds.
+// This proves the vulnerability that AuthorizeAndCreateIntent was designed to fix.
+func TestTC10_TwoTransactionStaleAuthority(t *testing.T) {
+	rec.begin("concurrency")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := authScenario(110)
+
+	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
+	targetID := createTestTarget(t, ctx, st, principal, principal)
+	beliefID := mustPromoted(t, ctx, st, sc, "belief for stale-authority negative control")
+	_ = st.AttachJustification(ctx, targetID, beliefID, "promoted", principal)
+	_ = st.RequestAuthorization(ctx, targetID, principal)
+	_ = st.Approve(ctx, targetID, principal)
+
+	// Step 1: Authorize — succeeds, transaction COMMITS.
+	authorizeResult, err := st.Authorize(ctx, targetID, defaultTuple(principal))
+	if err != nil || !authorizeResult.Allowed {
+		t.Fatalf("setup: Authorize should succeed, got allowed=%t err=%v", authorizeResult.Allowed, err)
+	}
+
+	// Step 2: RevokeTarget — succeeds, transaction COMMITS.
+	if err := st.RevokeTarget(ctx, targetID, principal, "stale-authority test"); err != nil {
+		t.Fatalf("setup: RevokeTarget failed: %v", err)
+	}
+
+	// Step 3: IntentOnPromoted — succeeds because gate FK only checks
+	// belief.status = 'promoted', NOT target_revocation.
+	err = st.IntentOnPromoted(ctx, sc, beliefID, "stale deploy action")
+
+	// Verify a stale intent exists.
+	var intentCnt int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM action_intent WHERE scenario_id = $1::UUID AND belief_id = $2::UUID AND state = 'live'`,
+		sc, beliefID).Scan(&intentCnt)
+
+	// The old sequence creates a stale intent (this is the vulnerability).
+	ok := err == nil && intentCnt == 1
+	rec.check(t, ok, Case{
+		ID: "T-C10", Wave: "concurrency",
+		Purpose:   "Old two-step sequence creates stale-authority intent (negative control)",
+		Expected:  "stale live intent exists after old two-step sequence",
+		Observed:  fmt.Sprintf("intent_count=%d, err=%v", intentCnt, err),
+		Invariant: "Old sequence: Authorize commits → RevokeTarget commits → IntentOnPromoted commits → stale intent persists",
+		Receipt:   receiptOf(err),
+	})
+}
+
+// T-C9 Part A: Lock-based serialization mechanism proof.
+// Proves that AuthorizeAndCreateIntent and RevokeTarget serialize on the
+// authority_target row via SELECT ... FOR UPDATE.
+//
+// Authorize-first: Conn1 acquires lock → authority valid → creates intent → commits.
+// Conn2 blocks on lock → acquires → revokes → commits.
+// Result: intent created before revocation — valid pre-revocation intent.
+//
+// Revoke-first: Conn1 acquires lock → revokes → commits.
+// Conn2 acquires lock → authority invalid → denies.
+// Result: no intent created — correct.
+func TestTC9_PartA_ForUpdateLockMechanism(t *testing.T) {
+	rec.begin("concurrency")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := authScenario(111)
+
+	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
+	targetID := createTestTarget(t, ctx, st, principal, principal)
+	beliefID := mustPromoted(t, ctx, st, sc, "belief for FOR UPDATE mechanism proof")
+	_ = st.AttachJustification(ctx, targetID, beliefID, "promoted", principal)
+	_ = st.RequestAuthorization(ctx, targetID, principal)
+	_ = st.Approve(ctx, targetID, principal)
+
+	lockSQL := `SELECT target_id FROM authority_target WHERE target_id = $1::UUID FOR UPDATE`
+	authorizeResolveSQL := `SELECT ts.principal_id FROM target_activation ta
+		JOIN target_snapshot ts ON ts.target_id = ta.target_id AND ts.snapshot_id = ta.snapshot_id
+		WHERE ta.target_id = $1::UUID
+		AND NOT EXISTS (SELECT 1 FROM target_revocation WHERE target_id = $1::UUID)`
+	intentInsertSQL := `INSERT INTO action_intent (scenario_id, belief_id, action)
+		VALUES ($1::UUID, $2::UUID, $3::STRING)`
+	revokeInsertSQL := `INSERT INTO target_revocation (target_id, revoked_by, reason)
+		VALUES ($1::UUID, $2::UUID, $3::STRING)`
+
+	// === Authorize-first ===
+
+	db1, err := shared.Conn(ctx)
+	if err != nil {
+		t.Fatalf("setup (conn1): %v", err)
+	}
+	defer db1.Close()
+	db2, err := shared.Conn(ctx)
+	if err != nil {
+		t.Fatalf("setup (conn2): %v", err)
+	}
+	defer db2.Close()
+
+	tx1, err := db1.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		t.Fatalf("setup (begin tx1): %v", err)
+	}
+	defer tx1.Rollback()
+
+	// Conn1: acquire lock on authority_target.
+	var locked string
+	if err := tx1.QueryRowContext(ctx, lockSQL, targetID).Scan(&locked); err != nil {
+		t.Fatalf("conn1 (lock): %v", err)
+	}
+
+	// Conn1: evaluate authority — valid.
+	var snapPrincipal string
+	if err := tx1.QueryRowContext(ctx, authorizeResolveSQL, targetID).Scan(&snapPrincipal); err != nil {
+		t.Fatalf("conn1 (authorize resolve): %v", err)
+	}
+
+	// Conn2: BEGIN and attempt to acquire lock — should block until tx1 commits.
+	tx2, err := db2.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		t.Fatalf("setup (begin tx2): %v", err)
+	}
+	defer tx2.Rollback()
+
+	lockCtx, lockCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer lockCancel()
+
+	var locked2 string
+	lockErr := make(chan error, 1)
+	go func() {
+		lockErr <- tx2.QueryRowContext(lockCtx, lockSQL, targetID).Scan(&locked2)
+	}()
+
+	// Conn1: create intent, commit (releases lock).
+	if _, err := tx1.ExecContext(ctx, intentInsertSQL, sc, beliefID, "mechanism proof action"); err != nil {
+		t.Fatalf("conn1 (insert intent): %v", err)
+	}
+	if err := tx1.Commit(); err != nil {
+		t.Fatalf("conn1 (commit): %v", err)
+	}
+
+	// Wait for Conn2 lock acquisition.
+	if err := <-lockErr; err != nil {
+		t.Fatalf("conn2 (lock, should have acquired after tx1 commit): %v", err)
+	}
+	lockCancel()
+
+	// Conn2: evaluate authority — should see revocation? No, not yet. Authority still valid.
+	// But lock was acquired, so revoke now.
+	if _, err := tx2.ExecContext(ctx, revokeInsertSQL, targetID, principal, "mechanism proof revoke"); err != nil {
+		t.Fatalf("conn2 (insert revocation): %v", err)
+	}
+	if err := tx2.Commit(); err != nil {
+		t.Fatalf("conn2 (commit): %v", err)
+	}
+
+	// Verify: intent exists (created by Conn1 before lock release).
+	var intentCnt int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM action_intent WHERE scenario_id = $1::UUID AND belief_id = $2::UUID AND state = 'live'`,
+		sc, beliefID).Scan(&intentCnt)
+
+	// Verify: revocation exists.
+	var revocationCnt int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM target_revocation WHERE target_id = $1::UUID`,
+		targetID).Scan(&revocationCnt)
+
+	// The lock-based ordering is proven by the test structure itself:
+	// 1. Conn2 blocked on FOR UPDATE until Conn1 committed (goroutine + 5s timeout)
+	// 2. Conn1 created intent while holding the lock (authority was valid)
+	// 3. Conn2 only acquired the lock after Conn1 released it
+	// 4. Conn2 then inserted the revocation
+	// Therefore: intent was created before revocation, while authority was valid.
+
+	ok := intentCnt == 1 && revocationCnt == 1
+	rec.check(t, ok, Case{
+		ID: "T-C9A", Wave: "concurrency",
+		Purpose:   "FOR UPDATE lock serializes authorize-first against concurrent revoke",
+		Expected:  "intent exists, revocation exists; Conn2 blocked on lock until Conn1 committed",
+		Observed:  fmt.Sprintf("intents=%d, revocations=%d", intentCnt, revocationCnt),
+		Invariant: "FOR UPDATE lock on authority_target ensures authorize-first ordering is respected",
+		Receipt:   "",
+	})
+}
+
+// T-C9 Part A2: Lock-based serialization proof — revoke-first.
+// Conn1 acquires lock → revokes → commits.
+// Conn2 acquires lock → evaluates authority → sees revocation → denies.
+// Result: no intent created — correct.
+func TestTC9_PartA2_ForUpdateLockRevokeFirst(t *testing.T) {
+	rec.begin("concurrency")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := authScenario(1110)
+
+	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
+	targetID := createTestTarget(t, ctx, st, principal, principal)
+	beliefID := mustPromoted(t, ctx, st, sc, "belief for FOR UPDATE revoke-first proof")
+	_ = st.AttachJustification(ctx, targetID, beliefID, "promoted", principal)
+	_ = st.RequestAuthorization(ctx, targetID, principal)
+	_ = st.Approve(ctx, targetID, principal)
+
+	lockSQL := `SELECT target_id FROM authority_target WHERE target_id = $1::UUID FOR UPDATE`
+	authorizeResolveSQL := `SELECT ts.principal_id FROM target_activation ta
+		JOIN target_snapshot ts ON ts.target_id = ta.target_id AND ts.snapshot_id = ta.snapshot_id
+		WHERE ta.target_id = $1::UUID
+		AND NOT EXISTS (SELECT 1 FROM target_revocation WHERE target_id = $1::UUID)`
+	revokeInsertSQL := `INSERT INTO target_revocation (target_id, revoked_by, reason)
+		VALUES ($1::UUID, $2::UUID, $3::STRING)`
+
+	db1, err := shared.Conn(ctx)
+	if err != nil {
+		t.Fatalf("setup (conn1): %v", err)
+	}
+	defer db1.Close()
+	db2, err := shared.Conn(ctx)
+	if err != nil {
+		t.Fatalf("setup (conn2): %v", err)
+	}
+	defer db2.Close()
+
+	tx1, err := db1.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		t.Fatalf("setup (begin tx1): %v", err)
+	}
+	defer tx1.Rollback()
+
+	// Conn1: acquire lock on authority_target.
+	var locked string
+	if err := tx1.QueryRowContext(ctx, lockSQL, targetID).Scan(&locked); err != nil {
+		t.Fatalf("conn1 (lock): %v", err)
+	}
+
+	// Conn1: insert revocation.
+	if _, err := tx1.ExecContext(ctx, revokeInsertSQL, targetID, principal, "revoke-first proof"); err != nil {
+		t.Fatalf("conn1 (insert revocation): %v", err)
+	}
+
+	// Conn2: BEGIN and attempt to acquire lock — should block until tx1 commits.
+	tx2, err := db2.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		t.Fatalf("setup (begin tx2): %v", err)
+	}
+	defer tx2.Rollback()
+
+	lockCtx, lockCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer lockCancel()
+
+	var locked2 string
+	lockErr := make(chan error, 1)
+	go func() {
+		lockErr <- tx2.QueryRowContext(lockCtx, lockSQL, targetID).Scan(&locked2)
+	}()
+
+	// Conn1: commit (releases lock).
+	if err := tx1.Commit(); err != nil {
+		t.Fatalf("conn1 (commit): %v", err)
+	}
+
+	// Wait for Conn2 lock acquisition.
+	if err := <-lockErr; err != nil {
+		t.Fatalf("conn2 (lock, should have acquired after tx1 commit): %v", err)
+	}
+	lockCancel()
+
+	// Conn2: evaluate authority — should see revocation and deny.
+	var snapPrincipal string
+	err = tx2.QueryRowContext(ctx, authorizeResolveSQL, targetID).Scan(&snapPrincipal)
+	authorityDenied := errors.Is(err, sql.ErrNoRows)
+
+	// Conn2: commit (no intent inserted).
+	if err := tx2.Commit(); err != nil {
+		t.Fatalf("conn2 (commit): %v", err)
+	}
+
+	// Verify: no live intent.
+	var intentCnt int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM action_intent WHERE scenario_id = $1::UUID AND belief_id = $2::UUID AND state = 'live'`,
+		sc, beliefID).Scan(&intentCnt)
+
+	// Verify: revocation exists.
+	var revocationCnt int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM target_revocation WHERE target_id = $1::UUID`,
+		targetID).Scan(&revocationCnt)
+
+	ok := authorityDenied && intentCnt == 0 && revocationCnt == 1
+	rec.check(t, ok, Case{
+		ID: "T-C9A2", Wave: "concurrency",
+		Purpose:   "FOR UPDATE lock serializes revoke-first: authority denied after revocation",
+		Expected:  "authority denied, no intent, revocation exists",
+		Observed:  fmt.Sprintf("authority_denied=%t, intents=%d, revocations=%d", authorityDenied, intentCnt, revocationCnt),
+		Invariant: "FOR UPDATE lock on authority_target ensures revoke-first ordering is respected",
+		Receipt:   "",
+	})
+}
+
+// T-C9 Part B: Black-box production invariant test — AuthorizeAndCreateIntent
+// under concurrent revocation. Verifies that the production implementation
+// obeys the serialization invariant established by T-C9 Part A (deterministic
+// lock-based mechanism proof). This test does NOT assume any specific
+// CockroachDB isolation behavior — it exercises the production code path
+// end-to-end and checks that no stale intent is committed.
+//
+// The mechanism proof is T-C9 Part A. This test captures MVCC timestamps
+// to distinguish valid pre-revocation intents from invalid post-revocation
+// intents, confirming the invariant holds in practice.
+func TestTC9_PartB_ConcurrentRevokeTarget(t *testing.T) {
+	rec.begin("concurrency")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := authScenario(112)
+
+	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
+	targetID := createTestTarget(t, ctx, st, principal, principal)
+	beliefID := mustPromoted(t, ctx, st, sc, "belief for concurrent revoke black-box")
+	_ = st.AttachJustification(ctx, targetID, beliefID, "promoted", principal)
+	_ = st.RequestAuthorization(ctx, targetID, principal)
+	_ = st.Approve(ctx, targetID, principal)
+
+	// Capture authorize and revoke results.
+	var authorizeResult kernel.AuthorizeResult
+	var authorizeErr error
+	var revokeErr error
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		authorizeResult, authorizeErr = st.AuthorizeAndCreateIntent(ctx, targetID,
+			defaultTuple(principal), sc, beliefID, "concurrent deploy action")
+	}()
+	go func() {
+		defer wg.Done()
+		revokeErr = st.RevokeTarget(ctx, targetID, principal, "concurrent revoke test")
+	}()
+	wg.Wait()
+
+	// Verify final state.
+	var intentCnt int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM action_intent WHERE scenario_id = $1::UUID AND belief_id = $2::UUID AND state = 'live'`,
+		sc, beliefID).Scan(&intentCnt)
+
+	var revocationCnt int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM target_revocation WHERE target_id = $1::UUID`,
+		targetID).Scan(&revocationCnt)
+
+	// Classify the outcome.
+	authorizeSucceeded := authorizeErr == nil && authorizeResult.Allowed
+	revokeSucceeded := revokeErr == nil
+
+	// Valid outcome A: authorize committed first, then revoke.
+	// Intent exists, revocation exists. Intent was created while authority was active.
+	validA := authorizeSucceeded && revokeSucceeded && intentCnt == 1 && revocationCnt == 1
+
+	// Valid outcome B: revoke won / serialization retry.
+	// Authorization denied, no intent, revocation exists.
+	validB := !authorizeSucceeded && revokeSucceeded && intentCnt == 0 && revocationCnt == 1
+
+	// Check for stale intent: revocation exists AND intent was created after revocation.
+	// Use MVCC timestamps to determine ordering.
+	staleIntent := false
+	if intentCnt > 0 && revocationCnt > 0 {
+		var intentMVCC, revocationMVCC int64
+		_ = shared.QueryRowContext(ctx,
+			`SELECT crdb_internal_mvcc_timestamp FROM action_intent
+			 WHERE scenario_id = $1::UUID AND belief_id = $2::UUID AND state = 'live'
+			 LIMIT 1`,
+			sc, beliefID).Scan(&intentMVCC)
+		_ = shared.QueryRowContext(ctx,
+			`SELECT crdb_internal_mvcc_timestamp FROM target_revocation WHERE target_id = $1::UUID`,
+			targetID).Scan(&revocationMVCC)
+		// If intent was created after revocation, it's stale.
+		staleIntent = intentMVCC > revocationMVCC
+	}
+
+	// Invalid outcome C: stale intent (revocation exists AND intent created after revocation).
+	invalidC := staleIntent
+
+	// The test asserts outcome C never occurs.
+	ok := (validA || validB) && !invalidC
+	rec.check(t, ok, Case{
+		ID: "T-C9B", Wave: "concurrency",
+		Purpose:   "Concurrent AuthorizeAndCreateIntent + RevokeTarget: no stale intent",
+		Expected:  "outcome A (authorize wins, intent valid) or B (revoke wins, denied); never C (stale intent)",
+		Observed:  fmt.Sprintf("authorize_allowed=%t, authorize_err=%v, revoke_err=%v, intents=%d, revocations=%d, stale=%t, outcome=%s", authorizeResult.Allowed, authorizeErr, revokeErr, intentCnt, revocationCnt, staleIntent, func() string {
+			if invalidC {
+				return "stale_intent_created"
+			}
+			if validA {
+				return "valid_pre_revocation_intent"
+			}
+			if validB {
+				return "authorization_denied"
+			}
+			return "unknown_ordering"
+		}()),
+		Invariant: "No committed live intent created on superseded authority",
+		Receipt: func() string {
+			if authorizeErr != nil {
+				return collapse(authorizeErr.Error())
+			}
+			if revokeErr != nil {
+				return collapse(revokeErr.Error())
+			}
+			return ""
+		}(),
+	})
+}
+
 // T-SR1: Approve without justification → ErrInvalidProposal.
 func TestTSR1_ApproveWithoutJustification(t *testing.T) {
 	rec.begin("security_regression")

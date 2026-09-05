@@ -1,10 +1,54 @@
 package api_test
 
 import (
+	"context"
 	"net/http"
 	"sync"
 	"testing"
+
+	"github.com/PithomLabs/solvent/kernel"
 )
+
+// TestIntegration_AuthorizeAction_ActorIDMismatch verifies that sending a
+// conflicting actor_id in the request body returns 403, not 400.
+func TestIntegration_AuthorizeAction_ActorIDMismatch(t *testing.T) {
+	db := testDB(t)
+	if db == nil {
+		return
+	}
+	defer db.Close()
+
+	ts := newTestServer(t, db)
+	defer ts.Close()
+
+	scenarioID := createTestScenario(t)
+	beliefID := createTestBelief(t, db, scenarioID)
+	principalID := createTestPrincipal(t, db)
+	targetID := createTestTarget(t, db, principalID)
+
+	// Create a DIFFERENT principal to use as a conflicting actor_id.
+	otherPrincipalID := createTestPrincipal(t, db)
+
+	body := map[string]interface{}{
+		"scenario_id":   scenarioID,
+		"belief_id":     beliefID,
+		"action":        "execute",
+		"target_id":     targetID,
+		"action_source": "user_typed",
+		"actor_id":      otherPrincipalID, // conflicts with authenticated principal
+	}
+	resp := doRequest(t, ts, "POST", "/v1/authorizations/action", body)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", resp.StatusCode)
+	}
+	var errResp map[string]interface{}
+	decodeJSON(t, resp, &errResp)
+
+	code, _ := errResp["code"].(string)
+	if code != "actor_id_mismatch" {
+		t.Errorf("expected code=actor_id_mismatch, got %s", code)
+	}
+}
 
 // TestIntegration_AuthorizeAction_Atomicity verifies that authority evaluation
 // and intent creation occur atomically. An unactivated target should produce
@@ -54,8 +98,9 @@ func TestIntegration_AuthorizeAction_Atomicity(t *testing.T) {
 	}
 }
 
-// TestIntegration_ConcurrentRevokeTarget verifies that revoking a target while
-// an authorization is in progress does not produce an inconsistent state.
+// TestIntegration_ConcurrentRevokeTarget is a smoke test that proves the API
+// does not crash or corrupt state under concurrency. It does NOT claim to prove
+// atomicity — the formal proof is at the kernel level (T-C9, T-C10).
 func TestIntegration_ConcurrentRevokeTarget(t *testing.T) {
 	db := testDB(t)
 	if db == nil {
@@ -71,10 +116,45 @@ func TestIntegration_ConcurrentRevokeTarget(t *testing.T) {
 	principalID := createTestPrincipal(t, db)
 	targetID := createTestTarget(t, db, principalID)
 
-	var wg sync.WaitGroup
-	errCh := make(chan error, 2)
+	// Retire debts, promote the belief, and attach a justification so the proposal is valid.
+	kern := kernel.New(db)
+	for _, item := range kernel.FullDebt {
+		if err := kern.RetireDebt(context.Background(), beliefID, item); err != nil {
+			t.Fatalf("retire debt %q: %v", item, err)
+		}
+	}
+	if err := kern.Promote(context.Background(), beliefID); err != nil {
+		t.Fatalf("promote belief: %v", err)
+	}
+	if err := kern.AttachJustification(context.Background(), targetID, beliefID, "promoted", principalID); err != nil {
+		t.Fatalf("attach justification: %v", err)
+	}
 
-	// Concurrent: authorize action and revoke target.
+	// Activate the target so authorization has a chance of succeeding.
+	reqBody := map[string]interface{}{
+		"scenario_id":   scenarioID,
+		"belief_id":     beliefID,
+		"action":        "execute",
+		"target_id":     targetID,
+		"action_source": "user_typed",
+	}
+	resp := doRequest(t, ts, "POST", "/v1/targets/"+targetID+"/request", reqBody)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("request authorization: expected 200, got %d", resp.StatusCode)
+	}
+	approveBody := map[string]interface{}{"approval_pin": "test-pin"}
+	resp = doRequest(t, ts, "POST", "/v1/targets/"+targetID+"/approve", approveBody)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("approve target: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Run concurrent requests.
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var authorizeStatus, revokeStatus int
+
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
@@ -86,36 +166,33 @@ func TestIntegration_ConcurrentRevokeTarget(t *testing.T) {
 			"action_source": "user_typed",
 		}
 		resp := doRequest(t, ts, "POST", "/v1/authorizations/action", body)
-		defer resp.Body.Close()
-		// Either 200 (allowed/denied) is acceptable — no crash.
-		if resp.StatusCode != http.StatusOK {
-			errCh <- nil
-		}
+		resp.Body.Close()
+		mu.Lock()
+		authorizeStatus = resp.StatusCode
+		mu.Unlock()
 	}()
 	go func() {
 		defer wg.Done()
-		body := map[string]interface{}{
-			"reason": "concurrent revocation test",
-		}
+		body := map[string]interface{}{"reason": "concurrent revocation test"}
 		resp := doRequest(t, ts, "POST", "/v1/targets/"+targetID+"/revoke", body)
-		defer resp.Body.Close()
-		// Either 200 (success) or 409/404 (already revoked/not found) is acceptable.
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusConflict && resp.StatusCode != http.StatusNotFound {
-			errCh <- nil
-		}
+		resp.Body.Close()
+		mu.Lock()
+		revokeStatus = resp.StatusCode
+		mu.Unlock()
 	}()
 
 	wg.Wait()
-	close(errCh)
 
-	for err := range errCh {
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
+	// No 500 errors during concurrent access.
+	if authorizeStatus == http.StatusInternalServerError {
+		t.Error("authorize returned 500 during concurrent access")
+	}
+	if revokeStatus == http.StatusInternalServerError {
+		t.Error("revoke returned 500 during concurrent access")
 	}
 
-	// Verify final state: target should be in a consistent state.
-	resp := doRequest(t, ts, "GET", "/v1/targets/"+targetID, nil)
+	// Verify final state: target must be in a consistent state.
+	resp = doRequest(t, ts, "GET", "/v1/targets/"+targetID, nil)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -127,7 +204,6 @@ func TestIntegration_ConcurrentRevokeTarget(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected state string, got %v", target["state"])
 	}
-	// State must be one of the defined values.
 	switch state {
 	case "revoked", "proposed", "requested", "approved", "activated":
 		// valid

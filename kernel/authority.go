@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -450,10 +451,12 @@ func (s *Store) Authorize(ctx context.Context, targetID string, tuple AuthorityT
 // AuthorizeAndCreateIntent evaluates current authority and creates a live
 // action intent inside ONE SERIALIZABLE transaction.
 //
-// Security guarantee: if authority is revoked between the authority evaluation
-// and the intent creation, CockroachDB SERIALIZABLE isolation causes the
-// transaction to abort or retry. A live intent can never be committed on
-// superseded authority.
+// Security guarantee: both the authority evaluation and the intent creation
+// are protected by a FOR UPDATE lock on authority_target, which serializes
+// against a concurrent RevokeTarget. If a revocation is committed before the
+// lock is acquired, the authority evaluation sees it and denies. If the lock
+// is acquired first, the revocation blocks until the intent is committed.
+// A live intent can never be committed on superseded authority.
 //
 // This method exists because the state transition "verify authority + create
 // intent" has security semantics that cannot safely be split across independent
@@ -471,6 +474,16 @@ func (s *Store) AuthorizeAndCreateIntent(
 ) (AuthorizeResult, error) {
 	var result AuthorizeResult
 	err := crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
+		// LOCK: serialize against concurrent RevokeTarget.
+		var locked string
+		if err := tx.QueryRowContext(ctx,
+			sqlAttachJustificationLock, targetID).Scan(&locked); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrTargetNotFound
+			}
+			return err
+		}
+
 		// 1. Evaluate authority (reuses authorizeWithinTx — one authority implementation).
 		var err error
 		result, err = authorizeWithinTx(ctx, tx, targetID, tuple)
@@ -495,10 +508,21 @@ func (s *Store) AuthorizeAndCreateIntent(
 	return result, nil
 }
 
-// RevokeTarget inserts a target_revocation row. It checks that the target exists,
-// has an activation, and has not already been revoked.
+// RevokeTarget inserts a target_revocation row. It serializes against concurrent
+// AuthorizeAndCreateIntent via FOR UPDATE lock on authority_target, then checks
+// that the target exists, has an activation, and has not already been revoked.
 func (s *Store) RevokeTarget(ctx context.Context, targetID, revokedBy, reason string) error {
 	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
+		// LOCK: serialize against concurrent AuthorizeAndCreateIntent.
+		var locked string
+		if err := tx.QueryRowContext(ctx,
+			sqlAttachJustificationLock, targetID).Scan(&locked); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrTargetNotFound
+			}
+			return err
+		}
+
 		// Verify target has an activation.
 		var cnt int
 		if err := tx.QueryRowContext(ctx,

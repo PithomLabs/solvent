@@ -22,9 +22,6 @@ import (
 // testDSN points at the per-package test database.
 var testDSN = testdb.SuiteDSN("api")
 
-// testPrincipalID is the authenticated principal for all API tests.
-const testPrincipalID = "00000000-0000-0000-0000-000000000001"
-
 // testDB opens a test database connection. Returns nil if CockroachDB is unavailable.
 func testDB(t *testing.T) *sql.DB {
 	t.Helper()

@@ -2,12 +2,17 @@ package api_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"testing"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
+
 	"github.com/PithomLabs/solvent/internal/testdb"
 )
+
+const testPrincipalID = "00000000-0000-0000-0000-000000000001"
 
 var schemaPaths = []string{
 	"../db/001_schema.sql",
@@ -31,6 +36,26 @@ func TestMain(m *testing.M) {
 		testdb.ReleaseResetLock(name)
 		os.Exit(1)
 	}
+
+	// Insert the test principal used by AuthMiddleware so FK references succeed.
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "api tests cannot start: open: %v\n", err)
+		testdb.ReleaseResetLock(name)
+		os.Exit(1)
+	}
+	_, err = db.ExecContext(ctx,
+		`INSERT INTO principal (principal_id, principal_type, issuer)
+		 VALUES ($1::UUID, 'service', 'test-api')
+		 ON CONFLICT (principal_id) DO NOTHING`,
+		testPrincipalID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "api tests cannot start: insert test principal: %v\n", err)
+		db.Close()
+		testdb.ReleaseResetLock(name)
+		os.Exit(1)
+	}
+	db.Close()
 
 	code := m.Run()
 

@@ -113,8 +113,14 @@ func (s *Server) handleAttachJustification(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	principal := AuthFromContext(r.Context())
+	if principal == nil {
+		writeError(w, http.StatusUnauthorized, "missing_principal", "Authentication required", nil)
+		return
+	}
+
 	if err := s.ledger.AttachJustification(r.Context(), targetID, beliefID, "promoted",
-		AuthFromContext(r.Context()).PrincipalID); err != nil {
+		principal.PrincipalID); err != nil {
 		writeKernelError(w, err, "")
 		return
 	}
@@ -138,6 +144,10 @@ func (s *Server) handleRequestAuthorization(w http.ResponseWriter, r *http.Reque
 	}
 
 	principal := AuthFromContext(r.Context())
+	if principal == nil {
+		writeError(w, http.StatusUnauthorized, "missing_principal", "Authentication required", nil)
+		return
+	}
 	if err := s.ledger.RequestAuthorization(r.Context(), targetID, principal.PrincipalID); err != nil {
 		writeKernelError(w, err, "")
 		return
@@ -172,6 +182,10 @@ func (s *Server) handleApproveTarget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	principal := AuthFromContext(r.Context())
+	if principal == nil {
+		writeError(w, http.StatusUnauthorized, "missing_principal", "Authentication required", nil)
+		return
+	}
 	if err := s.ledger.Approve(r.Context(), targetID, principal.PrincipalID); err != nil {
 		writeKernelError(w, err, "")
 		return
@@ -202,6 +216,10 @@ func (s *Server) handleRevokeTarget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	principal := AuthFromContext(r.Context())
+	if principal == nil {
+		writeError(w, http.StatusUnauthorized, "missing_principal", "Authentication required", nil)
+		return
+	}
 	if err := s.ledger.RevokeTarget(r.Context(), targetID, principal.PrincipalID, req.Reason); err != nil {
 		writeKernelError(w, err, "")
 		return
