@@ -1,0 +1,14 @@
+# Spectral linting rules for Solvent OpenAPI spec.
+# Run: spectral lint docs/openapi/solvent.yaml --ruleset docs/openapi/.spectral.yaml
+
+extends:
+  - spectral:oas
+
+rules:
+  operation-operationId: warn
+  operation-tags: warn
+  tag-description: off
+  no-eval-in-markdown: off
+  oas3-valid-media-example: off
+  info-contact: off
+  info-license: off

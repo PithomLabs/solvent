@@ -287,3 +287,13 @@ tasks:
       # spoken JSON-RPC to. It also pins the debt_item guard, which the SDK's schema
       # cannot enforce for us.
       - scripts/mcp_verify.sh
+
+  lint:openapi:
+    desc: Lint OpenAPI specification with Spectral
+    cmds:
+      - npx @stoplight/spectral-cli lint docs/openapi/solvent.yaml --ruleset docs/openapi/.spectral.yaml
+
+  test:openapi:
+    desc: Run OpenAPI contract-surface tests
+    cmds:
+      - go test -count=1 -v ./api/openapi/...

@@ -1,0 +1,1386 @@
+openapi: "3.1.0"
+info:
+  title: Solvent Authorization Kernel API
+  version: "1.0.0"
+  description: |
+    Transactional belief ledger for autonomous agents. The API is a frozen
+    canonical surface: no new endpoints, no shape changes, no behavioral
+    changes. Phase 4A remains the original semantic source except where an
+    explicitly documented security decision superseded it.
+
+    Authorization model:
+    - Beliefs carry evidence, evolve, may be promoted or retracted.
+    - Authority is gated by CockroachDB invariants, not application logic.
+    - The database — not the API — determines whether an action is allowed.
+
+    Forbidden endpoints (Phase 4A §8): The following patterns are
+    structurally prohibited and will never be added:
+    /execute-without-authority, /set-authorized, /approve-with-agent,
+    /update-authority-state, /force-execution, /override-authorization,
+    /set-actor, /impersonate, /approve-and-execute, /execute-as-approved,
+    /trust-tool-output, /cache-authorization.
+
+  contact:
+    name: Pithom Labs
+  license:
+    name: Proprietary
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Beliefs
+    description: Belief lifecycle operations
+  - name: Evidence
+    description: Evidence submission and retrieval
+  - name: Principals
+    description: Principal identity management
+  - name: Targets
+    description: Authority target lifecycle
+  - name: Authorizations
+    description: Authorization verification and action authorization
+  - name: Discharge
+    description: Debt discharge and retirement
+  - name: Activity
+    description: Audit activity log
+  - name: Ledger
+    description: Ledger summary and status
+
+paths:
+  # ──────────────────────────────────────────────
+  # Beliefs
+  # ──────────────────────────────────────────────
+
+  /v1/beliefs:
+    post:
+      operationId: enterBelief
+      summary: Enter a new belief into a scenario
+      tags: [Beliefs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnterBeliefRequest"
+      responses:
+        "201":
+          description: Belief created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BeliefResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    get:
+      operationId: listBeliefs
+      summary: List beliefs in a scenario
+      tags: [Beliefs]
+      parameters:
+        - name: scenario_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: claim_type
+          in: query
+          schema:
+            type: string
+            enum: [derived, accommodated, postulated]
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Belief list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BeliefListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/beliefs/{id}:
+    get:
+      operationId: getBelief
+      summary: Get a single belief
+      tags: [Beliefs]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - name: scenario_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Belief
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BeliefResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/beliefs/{id}/debt/retire:
+    post:
+      operationId: retireDebt
+      summary: Retire a single debt item on a belief
+      tags: [Beliefs]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetireDebtRequest"
+      responses:
+        "200":
+          description: Belief with retired debt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BeliefResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/beliefs/{id}/promote:
+    post:
+      operationId: promoteBelief
+      summary: Promote a belief (may be refused if debt remains)
+      tags: [Beliefs]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - name: scenario_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: |
+            On success: BeliefResponse with status "promoted".
+            On refusal (open debt): Verdict with type "refusal" and gate "promoted_is_debt_free".
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/BeliefResponse"
+                  - $ref: "#/components/schemas/Verdict"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/beliefs/{id}/retract:
+    post:
+      operationId: retractBelief
+      summary: Retract a belief and cascade-retract dependent intents
+      tags: [Beliefs]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - name: scenario_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Belief retracted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BeliefResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/beliefs/{id}/explain:
+    get:
+      operationId: explainBelief
+      summary: Get detailed belief state including promotion/authorization readiness
+      tags: [Beliefs]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - name: scenario_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Belief explain response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BeliefExplainResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/beliefs/{id}/evidence:
+    get:
+      operationId: listEvidenceForBelief
+      summary: List evidence attached to a belief
+      tags: [Beliefs]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - name: scenario_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Evidence list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EvidenceResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ──────────────────────────────────────────────
+  # Evidence
+  # ──────────────────────────────────────────────
+
+  /v1/evidence:
+    post:
+      operationId: addEvidence
+      summary: Add evidence to a belief
+      tags: [Evidence]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddEvidenceRequest"
+      responses:
+        "201":
+          description: Evidence created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/evidence/{id}:
+    get:
+      operationId: getEvidence
+      summary: Get a single evidence record
+      tags: [Evidence]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Evidence
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ──────────────────────────────────────────────
+  # Principals
+  # ──────────────────────────────────────────────
+
+  /v1/principals:
+    post:
+      operationId: createPrincipal
+      summary: Create a new principal (agent or service identity)
+      tags: [Principals]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePrincipalRequest"
+      responses:
+        "201":
+          description: Principal created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrincipalResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    get:
+      operationId: listPrincipals
+      summary: List principals
+      tags: [Principals]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Principal list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrincipalListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/principals/{id}:
+    get:
+      operationId: getPrincipal
+      summary: Get a single principal
+      tags: [Principals]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Principal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrincipalResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/principals/{id}/revoke:
+    post:
+      operationId: revokePrincipal
+      summary: Revoke a principal
+      tags: [Principals]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Principal revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrincipalResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ──────────────────────────────────────────────
+  # Targets
+  # ──────────────────────────────────────────────
+
+  /v1/targets:
+    post:
+      operationId: createTarget
+      summary: Create an authorization target (action request with tuple fields)
+      tags: [Targets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTargetRequest"
+      responses:
+        "201":
+          description: Target created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetResponse"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    get:
+      operationId: listTargets
+      summary: List targets
+      tags: [Targets]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Target list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/targets/{id}:
+    get:
+      operationId: getTarget
+      summary: Get a single target
+      tags: [Targets]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Target
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/targets/{id}/justifications:
+    post:
+      operationId: attachJustification
+      summary: Attach a justification to a target
+      description: |
+        M-1 reconciliation: `belief_id` is a required query parameter (frozen Phase 4B behavior).
+        `attached_by` is derived from the authenticated principal.
+      tags: [Targets]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+        - name: belief_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Belief to attach as justification (query param, frozen behavior)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachJustificationRequest"
+      responses:
+        "200":
+          description: Justification attached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/targets/{id}/request:
+    post:
+      operationId: requestAuthorization
+      summary: Request authorization for a target (sets approval pin)
+      tags: [Targets]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      responses:
+        "200":
+          description: Authorization requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/targets/{id}/approve:
+    post:
+      operationId: approveTarget
+      summary: Approve a target with the approval pin
+      description: |
+        M-2 reconciliation: `approved_by` is server-derived from the authenticated principal.
+        Callers supply only the `approval_pin`.
+      tags: [Targets]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveTargetRequest"
+      responses:
+        "200":
+          description: Target approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/targets/{id}/revoke:
+    post:
+      operationId: revokeTarget
+      summary: Revoke a target
+      description: |
+        M-3 reconciliation: `revoked_by` is server-derived from the authenticated principal.
+        Callers supply only the `reason`.
+      tags: [Targets]
+      parameters:
+        - $ref: "#/components/parameters/PathID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevokeTargetRequest"
+      responses:
+        "200":
+          description: Target revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ──────────────────────────────────────────────
+  # Authorizations
+  # ──────────────────────────────────────────────
+
+  /v1/authorizations/verify:
+    post:
+      operationId: verifyAuthorization
+      summary: Verify whether an authority tuple is currently allowed
+      description: |
+        M-4 reconciliation: `principal_id` is NOT in the request body.
+        It is derived from the authenticated principal.
+        Body contains the 8 tuple fields only.
+      tags: [Authorizations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyAuthRequest"
+      responses:
+        "200":
+          description: Authorization result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/authorizations/action:
+    post:
+      operationId: authorizeAction
+      summary: Authorize an action against a promoted belief
+      description: |
+        M-5 / M-6 reconciliation (canonical v1 API):
+        - `actor_id` is optional; if present, must match the authenticated principal (403 on mismatch).
+        - `action_source` must equal "user_typed" (403 on tool output).
+        - The AuthorityTuple is constructed server-side from `scenario_id`, `belief_id`, and `action`.
+        - Hardcoded: resource_type="scenario", scope="belief:<belief_id>",
+          action_namespace="solvent", consequence_type="execution", consequence_parameters={}.
+      tags: [Authorizations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthorizeActionRequest"
+      responses:
+        "200":
+          description: Action authorized or refused
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthorizeActionResult"
+        "403":
+          description: |
+            Forbidden. Possible codes:
+            - `actor_id_mismatch`: actor_id does not match authenticated principal
+            - `action_source_tool_output`: action_source is not "user_typed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ──────────────────────────────────────────────
+  # Discharge
+  # ──────────────────────────────────────────────
+
+  /v1/discharge:
+    post:
+      operationId: discharge
+      summary: Discharge an obligation on a belief
+      tags: [Discharge]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DischargeRequest"
+      responses:
+        "200":
+          description: Obligation discharged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DischargeResult"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ──────────────────────────────────────────────
+  # Activity / Ledger (read-only)
+  # ──────────────────────────────────────────────
+
+  /v1/activity:
+    get:
+      operationId: getActivity
+      summary: List activity log entries
+      tags: [Activity]
+      parameters:
+        - name: scenario_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: Activity log
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /v1/ledger:
+    get:
+      operationId: getLedger
+      summary: Get ledger summary for a scenario
+      tags: [Ledger]
+      parameters:
+        - name: scenario_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Ledger summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerSummaryResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+# ══════════════════════════════════════════════
+# Components
+# ══════════════════════════════════════════════
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        API key passed as Bearer token. The token maps to a single
+        principal_id. The authenticated principal is the effective identity
+        for all server-derived fields.
+
+  parameters:
+    PathID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        default: 20
+        maximum: 100
+
+    Offset:
+      name: offset
+      in: query
+      schema:
+        type: integer
+        default: 0
+        minimum: 0
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+          examples:
+            missing:
+              summary: Missing Authorization header
+              value:
+                code: missing_authorization
+                message: "missing_authorization"
+                retryable: false
+            invalid:
+              summary: Invalid token
+              value:
+                code: invalid_token
+                message: "invalid_token"
+                retryable: false
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+
+    Conflict:
+      description: Conflict (e.g., approval pin mismatch, already activated)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/APIError"
+
+  schemas:
+    # ────────────────────────────────────────────
+    # Error
+    # ────────────────────────────────────────────
+
+    APIError:
+      type: object
+      required: [code, message, retryable]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+          example: validation_error
+        message:
+          type: string
+          description: Human-readable error message
+        details:
+          type: object
+          additionalProperties: true
+          description: Optional structured error details
+        retryable:
+          type: boolean
+          description: Whether the request is safe to retry
+        request_id:
+          type: string
+          description: Optional request identifier for tracing
+        sqlstate:
+          type: string
+          description: PostgreSQL SQLSTATE code if the error originated from a DB constraint
+        constraint_name:
+          type: string
+          description: Database constraint name if applicable
+
+    # ────────────────────────────────────────────
+    # Beliefs
+    # ────────────────────────────────────────────
+
+    EnterBeliefRequest:
+      type: object
+      required: [scenario_id, claim, claim_type]
+      properties:
+        scenario_id:
+          type: string
+          format: uuid
+        claim:
+          type: string
+        claim_type:
+          type: string
+          enum: [derived, accommodated, postulated]
+
+    BeliefResponse:
+      type: object
+      properties:
+        belief_id:
+          type: string
+          format: uuid
+        scenario_id:
+          type: string
+          format: uuid
+        claim:
+          type: string
+        claim_type:
+          type: string
+        status:
+          type: string
+        debt:
+          type: array
+          items:
+            type: string
+        final_truth:
+          type: boolean
+        evidence_count:
+          type: integer
+        intent_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    BeliefListResponse:
+      type: object
+      properties:
+        beliefs:
+          type: array
+          items:
+            $ref: "#/components/schemas/BeliefResponse"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    RetireDebtRequest:
+      type: object
+      required: [debt_item]
+      properties:
+        debt_item:
+          type: string
+
+    Verdict:
+      type: object
+      properties:
+        type:
+          type: string
+          example: refusal
+        reason:
+          type: string
+        gate:
+          type: string
+          example: promoted_is_debt_free
+
+    BeliefExplainResponse:
+      type: object
+      properties:
+        belief_id:
+          type: string
+          format: uuid
+        claim:
+          type: string
+        claim_type:
+          type: string
+        status:
+          type: string
+        remaining_debt:
+          type: array
+          items:
+            type: string
+        final_truth:
+          type: boolean
+        is_promoted:
+          type: boolean
+        is_retracted:
+          type: boolean
+        can_promote:
+          type: boolean
+        promotion_blocked_reason:
+          type: string
+        predicted_promotion_sqlstate:
+          type: string
+        predicted_promotion_constraint:
+          type: string
+        can_authorize:
+          type: boolean
+        authorization_blocked_reason:
+          type: string
+        predicted_authorization_sqlstate:
+          type: string
+        predicted_authorization_constraint:
+          type: string
+        live_intents:
+          type: array
+          items:
+            type: object
+            properties:
+              belief_id:
+                type: string
+              action:
+                type: string
+              state:
+                type: string
+        evidence_count:
+          type: integer
+        human_summary:
+          type: string
+
+    # ────────────────────────────────────────────
+    # Evidence
+    # ────────────────────────────────────────────
+
+    AddEvidenceRequest:
+      type: object
+      required: [scenario_id, belief_id, provenance_class, content_sha256]
+      properties:
+        scenario_id:
+          type: string
+          format: uuid
+        belief_id:
+          type: string
+          format: uuid
+        provenance_class:
+          type: string
+          enum: [external_feed, reproducible_artifact, live_scan, operator_asserted]
+        source_url:
+          type: string
+        content_sha256:
+          type: string
+
+    EvidenceResponse:
+      type: object
+      properties:
+        evidence_id:
+          type: string
+          format: uuid
+        belief_id:
+          type: string
+          format: uuid
+        provenance_class:
+          type: string
+        source_url:
+          type: string
+        content_sha256:
+          type: string
+        ingested_at:
+          type: string
+          format: date-time
+
+    # ────────────────────────────────────────────
+    # Principals
+    # ────────────────────────────────────────────
+
+    CreatePrincipalRequest:
+      type: object
+      required: [principal_type, issuer]
+      properties:
+        principal_type:
+          type: string
+        issuer:
+          type: string
+
+    PrincipalResponse:
+      type: object
+      properties:
+        principal_id:
+          type: string
+          format: uuid
+        principal_type:
+          type: string
+        issuer:
+          type: string
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    PrincipalListResponse:
+      type: object
+      properties:
+        principals:
+          type: array
+          items:
+            $ref: "#/components/schemas/PrincipalResponse"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    # ────────────────────────────────────────────
+    # Targets
+    # ────────────────────────────────────────────
+
+    CreateTargetRequest:
+      type: object
+      required:
+        - principal_id
+        - resource_type
+        - resource_id
+        - scope
+        - action_namespace
+        - action_name
+        - consequence_type
+        - created_by
+      properties:
+        principal_id:
+          type: string
+          format: uuid
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        scope:
+          type: string
+        action_namespace:
+          type: string
+        action_name:
+          type: string
+        consequence_type:
+          type: string
+        consequence_parameters:
+          type: object
+          description: Optional JSON parameters
+        created_by:
+          type: string
+          format: uuid
+
+    TargetResponse:
+      type: object
+      properties:
+        target_id:
+          type: string
+          format: uuid
+        principal_id:
+          type: string
+          format: uuid
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        scope:
+          type: string
+        action_namespace:
+          type: string
+        action_name:
+          type: string
+        consequence_type:
+          type: string
+        consequence_parameters:
+          type: object
+        created_by:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum: [proposed, requested, revoked]
+        created_at:
+          type: string
+          format: date-time
+        requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        requested_by:
+          type: string
+          nullable: true
+
+    TargetListResponse:
+      type: object
+      properties:
+        targets:
+          type: array
+          items:
+            $ref: "#/components/schemas/TargetResponse"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    AttachJustificationRequest:
+      type: object
+      required: [instrument_ref]
+      properties:
+        instrument_ref:
+          type: string
+          description: Reference to the justification instrument
+
+    ApproveTargetRequest:
+      type: object
+      required: [approval_pin]
+      properties:
+        approval_pin:
+          type: string
+          description: Approval pin hash to verify
+
+    RevokeTargetRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          description: Reason for revocation
+
+    # ────────────────────────────────────────────
+    # Authorizations
+    # ────────────────────────────────────────────
+
+    VerifyAuthRequest:
+      type: object
+      required:
+        - target_id
+        - resource_type
+        - resource_id
+        - scope
+        - action_namespace
+        - action_name
+        - consequence_type
+        - consequence_parameters
+      description: |
+        M-4: 8 tuple fields only. principal_id is NOT in the request body;
+        it is derived from the authenticated principal.
+      properties:
+        target_id:
+          type: string
+          format: uuid
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        scope:
+          type: string
+        action_namespace:
+          type: string
+        action_name:
+          type: string
+        consequence_type:
+          type: string
+        consequence_parameters:
+          type: object
+
+    AuthResult:
+      type: object
+      properties:
+        target_id:
+          type: string
+          format: uuid
+        allowed:
+          type: boolean
+        reason:
+          type: string
+
+    AuthorizeActionRequest:
+      type: object
+      required: [scenario_id, belief_id, action, action_source, target_id]
+      description: |
+        M-5 / M-6: Canonical v1 action authorization.
+        - actor_id is optional; if present, must match authenticated principal.
+        - action_source must equal "user_typed".
+        - The AuthorityTuple is constructed server-side.
+      properties:
+        scenario_id:
+          type: string
+          format: uuid
+          description: Scenario containing the belief
+        belief_id:
+          type: string
+          format: uuid
+          description: Promoted belief authorizing the action
+        action:
+          type: string
+          description: Action to authorize (e.g., "deploy etcd v3.5.0")
+        action_source:
+          type: string
+          enum: [user_typed]
+          description: Must be "user_typed"; tool output is rejected (403)
+        target_id:
+          type: string
+          format: uuid
+          description: Target whose approval pins the action
+        actor_id:
+          type: string
+          description: |
+            Optional audit attribution. If present, must match the
+            authenticated principal or the request is rejected with 403
+            actor_id_mismatch.
+
+    AuthorizeActionResult:
+      type: object
+      properties:
+        belief_id:
+          type: string
+          format: uuid
+        intent_id:
+          type: string
+          format: uuid
+        intent_state:
+          type: string
+        action:
+          type: string
+        authority:
+          $ref: "#/components/schemas/AuthResult"
+
+    # ────────────────────────────────────────────
+    # Discharge
+    # ────────────────────────────────────────────
+
+    DischargeRequest:
+      type: object
+      required: [belief_id, obligation_key, instrument_ref, discharged_by]
+      properties:
+        belief_id:
+          type: string
+          format: uuid
+        obligation_key:
+          type: string
+        instrument_ref:
+          type: string
+        discharged_by:
+          type: string
+          format: uuid
+
+    DischargeResult:
+      type: object
+      properties:
+        belief_id:
+          type: string
+          format: uuid
+        obligation_key:
+          type: string
+        discharged_by:
+          type: string
+          format: uuid
+
+    # ────────────────────────────────────────────
+    # Activity
+    # ────────────────────────────────────────────
+
+    ActivityResponse:
+      type: object
+      properties:
+        activities:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityEntry"
+        total:
+          type: integer
+
+    ActivityEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        scenario_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        actor_id:
+          type: string
+        subject_id:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        sqlstate:
+          type: string
+        constraint_name:
+          type: string
+        refusal:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    # ────────────────────────────────────────────
+    # Ledger
+    # ────────────────────────────────────────────
+
+    LedgerSummaryResponse:
+      type: object
+      properties:
+        scenario_id:
+          type: string
+          format: uuid
+        belief_count:
+          type: integer
+        evidence_count:
+          type: integer
+        promoted_count:
+          type: integer
+        live_intent_count:
+          type: integer
+        retracted_count:
+          type: integer
+        live_on_nonpromoted:
+          type: integer

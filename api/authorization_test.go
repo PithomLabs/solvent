@@ -19,13 +19,13 @@ func TestAuth_Verify(t *testing.T) {
 	targetID := createTestTarget(t, db, principalID)
 
 	body := map[string]interface{}{
-		"target_id":         targetID,
-		"resource_type":     "scenario",
-		"resource_id":       "test-scenario",
-		"scope":             "global",
-		"action_namespace":  "solvent",
-		"action_name":       "execute",
-		"consequence_type":  "execution",
+		"target_id":        targetID,
+		"resource_type":    "scenario",
+		"resource_id":      "test-scenario",
+		"scope":            "global",
+		"action_namespace": "solvent",
+		"action_name":      "execute",
+		"consequence_type": "execution",
 	}
 	resp := doRequest(t, ts, "POST", "/v1/authorizations/verify", body)
 	if resp.StatusCode != http.StatusOK {

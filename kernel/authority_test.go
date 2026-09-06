@@ -1726,9 +1726,9 @@ func TestTC9_PartB_ConcurrentRevokeTarget(t *testing.T) {
 	ok := (validA || validB) && !invalidC
 	rec.check(t, ok, Case{
 		ID: "T-C9B", Wave: "concurrency",
-		Purpose:   "Concurrent AuthorizeAndCreateIntent + RevokeTarget: no stale intent",
-		Expected:  "outcome A (authorize wins, intent valid) or B (revoke wins, denied); never C (stale intent)",
-		Observed:  fmt.Sprintf("authorize_allowed=%t, authorize_err=%v, revoke_err=%v, intents=%d, revocations=%d, stale=%t, outcome=%s", authorizeResult.Allowed, authorizeErr, revokeErr, intentCnt, revocationCnt, staleIntent, func() string {
+		Purpose:  "Concurrent AuthorizeAndCreateIntent + RevokeTarget: no stale intent",
+		Expected: "outcome A (authorize wins, intent valid) or B (revoke wins, denied); never C (stale intent)",
+		Observed: fmt.Sprintf("authorize_allowed=%t, authorize_err=%v, revoke_err=%v, intents=%d, revocations=%d, stale=%t, outcome=%s", authorizeResult.Allowed, authorizeErr, revokeErr, intentCnt, revocationCnt, staleIntent, func() string {
 			if invalidC {
 				return "stale_intent_created"
 			}

@@ -111,20 +111,20 @@ type CreateTargetRequest struct {
 
 // TargetResponse is a target representation in API responses.
 type TargetResponse struct {
-	TargetID               string          `json:"target_id"`
-	PrincipalID            string          `json:"principal_id"`
-	ResourceType           string          `json:"resource_type"`
-	ResourceID             string          `json:"resource_id"`
-	Scope                  string          `json:"scope"`
-	ActionNamespace        string          `json:"action_namespace"`
-	ActionName             string          `json:"action_name"`
-	ConsequenceType        string          `json:"consequence_type"`
-	ConsequenceParameters  json.RawMessage `json:"consequence_parameters"`
-	CreatedBy              string          `json:"created_by"`
-	State                  string          `json:"state"`
-	CreatedAt              time.Time       `json:"created_at"`
-	RequestedAt            *time.Time      `json:"requested_at,omitempty"`
-	RequestedBy            *string         `json:"requested_by,omitempty"`
+	TargetID              string          `json:"target_id"`
+	PrincipalID           string          `json:"principal_id"`
+	ResourceType          string          `json:"resource_type"`
+	ResourceID            string          `json:"resource_id"`
+	Scope                 string          `json:"scope"`
+	ActionNamespace       string          `json:"action_namespace"`
+	ActionName            string          `json:"action_name"`
+	ConsequenceType       string          `json:"consequence_type"`
+	ConsequenceParameters json.RawMessage `json:"consequence_parameters"`
+	CreatedBy             string          `json:"created_by"`
+	State                 string          `json:"state"`
+	CreatedAt             time.Time       `json:"created_at"`
+	RequestedAt           *time.Time      `json:"requested_at,omitempty"`
+	RequestedBy           *string         `json:"requested_by,omitempty"`
 }
 
 // TargetListResponse is a paginated list of targets.
@@ -154,15 +154,14 @@ type RevokeTargetRequest struct {
 
 // VerifyAuthRequest is the request body for POST /v1/authorizations/verify.
 type VerifyAuthRequest struct {
-	TargetID               string          `json:"target_id"`
-	PrincipalID            string          `json:"principal_id"`
-	ResourceType           string          `json:"resource_type"`
-	ResourceID             string          `json:"resource_id"`
-	Scope                  string          `json:"scope"`
-	ActionNamespace        string          `json:"action_namespace"`
-	ActionName             string          `json:"action_name"`
-	ConsequenceType        string          `json:"consequence_type"`
-	ConsequenceParameters  json.RawMessage `json:"consequence_parameters"`
+	TargetID              string          `json:"target_id"`
+	ResourceType          string          `json:"resource_type"`
+	ResourceID            string          `json:"resource_id"`
+	Scope                 string          `json:"scope"`
+	ActionNamespace       string          `json:"action_namespace"`
+	ActionName            string          `json:"action_name"`
+	ConsequenceType       string          `json:"consequence_type"`
+	ConsequenceParameters json.RawMessage `json:"consequence_parameters"`
 }
 
 // AuthResult is the response for authorization verification.
