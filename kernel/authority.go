@@ -509,16 +509,91 @@ func (s *Store) AuthorizeAndCreateIntent(
 	return result, nil
 }
 
-// CompleteIntent transitions a live intent to 'executed'. It is idempotent:
+// CompleteIntent transitions an executing intent to 'executed'. It is idempotent:
 // completing an already-executed intent is a no-op (zero rows affected).
 //
 // This method is called by the service layer after a provider accepts an
-// execution request. The intent must have been created by AuthorizeAndCreateIntent
-// and must still be in 'live' state.
+// execution request. The intent must have been claimed by ClaimIntent
+// and must be in 'executing' state.
 func (s *Store) CompleteIntent(ctx context.Context, scenarioID, intentID string) error {
 	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, sqlCompleteIntent, intentID, scenarioID)
 		return err
+	})
+}
+
+// ClaimIntent transitions a live intent to 'executing'. It is atomic:
+// only one caller can successfully claim a given intent.
+//
+// Returns nil on success (state is now 'executing').
+// Returns ErrIntentNotLive if the intent is not in 'live' state.
+//
+// This is the sole authoritative ownership gate for execution.
+// The CAS predicate (WHERE state = 'live') ensures at most one concurrent
+// claim succeeds per intent (CI-4).
+func (s *Store) ClaimIntent(ctx context.Context, scenarioID, intentID string) error {
+	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, sqlClaimIntent, intentID, scenarioID)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrIntentNotLive
+		}
+		return nil
+	})
+}
+
+// RollbackClaim transitions an executing intent back to 'live' after
+// definitive provider rejection. Only valid when state is 'executing'.
+//
+// Returns nil on success (state is now 'live').
+// Returns ErrNotExecuting if the intent is not in 'executing' state.
+//
+// Only called when the provider definitively rejects (e.g., 403 Forbidden,
+// validation error, explicit rejection). NOT called for ambiguous failures
+// (timeout, network error, lost response) — those leave intent as executing.
+func (s *Store) RollbackClaim(ctx context.Context, scenarioID, intentID string) error {
+	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, sqlRollbackClaim, intentID, scenarioID)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotExecuting
+		}
+		return nil
+	})
+}
+
+// CancelIntent transitions an executing intent to 'cancelled'.
+// Only valid when state is 'executing'. Used by operator reconciliation
+// when the operator decides not to retry.
+//
+// Returns nil on success (state is now 'cancelled').
+// Returns ErrNotExecuting if the intent is not in 'executing' state.
+func (s *Store) CancelIntent(ctx context.Context, scenarioID, intentID string) error {
+	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
+		result, err := tx.ExecContext(ctx, sqlCancelIntent, intentID, scenarioID)
+		if err != nil {
+			return err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrNotExecuting
+		}
+		return nil
 	})
 }
 

@@ -57,14 +57,23 @@ func (f *FakeGitHubProvider) TriggerWorkflow(ctx context.Context, repo, workflow
 	defer f.callWg.Done()
 
 	if f.lostResponse {
-		return nil, fmt.Errorf("response lost: provider accepted but response not received")
+		return nil, &ProviderError{
+			Err:    fmt.Errorf("response lost: provider accepted but response not received"),
+			Outcome: ProviderAmbiguous,
+		}
 	}
 
 	if !f.accept {
 		if f.err != nil {
-			return nil, f.err
+			return nil, &ProviderError{
+				Err:    f.err,
+				Outcome: ProviderRejected,
+			}
 		}
-		return nil, fmt.Errorf("provider rejected the workflow trigger")
+		return nil, &ProviderError{
+			Err:    fmt.Errorf("provider rejected the workflow trigger"),
+			Outcome: ProviderRejected,
+		}
 	}
 
 	return &WorkflowResult{RunID: f.runID}, nil

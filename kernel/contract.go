@@ -35,6 +35,9 @@ type Contract interface {
 	RevokeTarget(context.Context, string, string, string) error
 	Discharge(context.Context, string, string, string, string) error
 	CompleteIntent(context.Context, string, string) error
+	ClaimIntent(context.Context, string, string) error
+	RollbackClaim(context.Context, string, string) error
+	CancelIntent(context.Context, string, string) error
 }
 
 var (

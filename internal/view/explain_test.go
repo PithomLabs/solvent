@@ -32,6 +32,7 @@ func TestMain(m *testing.M) {
 		"../../db/005_authority_mvp.sql",
 		"../../db/006_authority_justification_cascade.sql",
 		"../../db/007_service_tables.sql",
+		"../../db/008_executing_state.sql",
 	}
 	if err := testdb.Reset(ctx, dsnExplain, schemaPaths...); err != nil {
 		fmt.Fprintf(os.Stderr, "view explain tests cannot start: %v\n", err)

@@ -28,6 +28,10 @@ var (
 	ErrDuplicateDischarge   = errors.New("duplicate discharge")
 	ErrTargetNotActivated   = errors.New("target not activated")
 	ErrInvalidProposal      = errors.New("invalid proposal")
+
+	// Execution lifecycle sentinels.
+	ErrIntentNotLive = errors.New("intent is not in live state")
+	ErrNotExecuting  = errors.New("intent is not in executing state")
 )
 
 // SQLSTATE codes this package classifies on. Contract §4: classification MUST use
