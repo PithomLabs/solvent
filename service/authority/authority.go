@@ -15,6 +15,7 @@ package authority
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -26,13 +27,14 @@ import (
 
 // AuthorizationDecision is the outcome of PrepareForAction.
 type AuthorizationDecision struct {
-	Allowed      bool   `json:"allowed"`
-	Reason       string `json:"reason,omitempty"`
-	BeliefID     string `json:"belief_id"`
-	BeliefStatus string `json:"belief_status"`
-	TargetID     string `json:"target_id"`
-	Action       string `json:"action"`
-	CheckedAt    time.Time `json:"checked_at"`
+	Allowed               bool   `json:"allowed"`
+	Reason                string `json:"reason,omitempty"`
+	BeliefID              string `json:"belief_id"`
+	BeliefStatus          string `json:"belief_status"`
+	TargetID              string `json:"target_id"`
+	Action                string `json:"action"`
+	CheckedAt             time.Time `json:"checked_at"`
+	ConsequenceParameters []byte   `json:"-"` // snapshot's approved params from kernel
 }
 
 // ExecutionResult records the outcome of an action execution.
@@ -46,18 +48,36 @@ type ExecutionResult struct {
 	ExecutedAt time.Time `json:"executed_at"`
 }
 
+// auditLogger is the minimal audit interface used by the authority service.
+// *audit.Service satisfies this interface.
+type auditLogger interface {
+	Log(ctx context.Context, entry *audit.ActivityEntry) error
+}
+
+// testHook is called after final authorization and intent-state verification
+// but before executor invocation. nil in production.
+type testHook func()
+
 // Service manages the authority boundary. It is the ONE production path for
 // consequential external execution.
 type Service struct {
-	db       *sql.DB
-	kern     *kernel.Store
-	policy   *policy.Service
-	audit    *audit.Service
-	execReg  *executor.Registry
+	db           *sql.DB
+	kern         *kernel.Store
+	policy       *policy.Service
+	audit        auditLogger
+	execReg      *executor.Registry
+	beforeExecute testHook
+}
+
+// SetTestHook installs a deterministic synchronization hook for testing.
+// The hook fires after authorization and intent-state verification,
+// immediately before executor invocation. nil in production.
+func (s *Service) SetTestHook(hook testHook) {
+	s.beforeExecute = hook
 }
 
 // New creates a new authority Service.
-func New(db *sql.DB, pol *policy.Service, aud *audit.Service, reg *executor.Registry) *Service {
+func New(db *sql.DB, pol *policy.Service, aud auditLogger, reg *executor.Registry) *Service {
 	return &Service{
 		db:      db,
 		kern:    kernel.New(db),
@@ -65,6 +85,19 @@ func New(db *sql.DB, pol *policy.Service, aud *audit.Service, reg *executor.Regi
 		audit:   aud,
 		execReg: reg,
 	}
+}
+
+// actionExecutorMap maps action names to registered executor names.
+// Executor selection is constrained by the authorized action, not by
+// caller-supplied params.
+var actionExecutorMap = map[string]string{
+	"deploy": "github_trigger_workflow",
+}
+
+// resolveExecutor returns the registered executor name for the given action.
+func resolveExecutor(action string) (string, bool) {
+	name, ok := actionExecutorMap[action]
+	return name, ok
 }
 
 // PrepareForAction gathers current context and delegates to kernel.Authorize.
@@ -123,6 +156,7 @@ func (s *Service) PrepareForAction(
 
 	decision.Allowed = result.Allowed
 	decision.Reason = result.Reason
+	decision.ConsequenceParameters = result.ConsequenceParameters
 
 	// 4. Log the authorization check.
 	logType := audit.ActivityAuthorizationGranted
@@ -158,6 +192,7 @@ func (s *Service) PrepareForAction(
 func (s *Service) ExecuteAction(
 	ctx context.Context,
 	scenarioID, beliefID, action, targetID, actorID string,
+	intentID string,
 	params map[string]interface{},
 	consequenceType string,
 	consequenceParameters []byte,
@@ -194,20 +229,52 @@ func (s *Service) ExecuteAction(
 	}
 
 	// 3. Resolve executor from internal registry (NOT caller-supplied).
-	//
-	// Future invariant: when real executors are introduced, tool_name must NOT
-	// become a caller-controlled arbitrary consequential capability selector.
-	// Executor selection must be constrained by the authorized consequence/action
-	// and a trusted internal mapping, not by caller-supplied params.
-	toolName, _ := params["tool_name"].(string)
-	fn, ok := s.execReg.Get(toolName)
+	executorName, ok := resolveExecutor(action)
 	if !ok {
 		result.Success = false
-		result.Error = fmt.Sprintf("executor not registered for tool: %s", toolName)
+		result.Error = fmt.Sprintf("no executor registered for action: %s", action)
+		return result, nil
+	}
+	fn, ok := s.execReg.Get(executorName)
+	if !ok {
+		result.Success = false
+		result.Error = fmt.Sprintf("executor not registered: %s", executorName)
 		return result, nil
 	}
 
-	// 4. Log authorization granted before execution.
+	// 4. Verify exact intent is live (one DB read between T2 and T3).
+	var intentState string
+	err = s.db.QueryRowContext(ctx, `
+		SELECT state FROM action_intent
+		WHERE id = $1::UUID AND scenario_id = $2::UUID
+		  AND belief_id = $3::UUID AND action = $4`,
+		intentID, scenarioID, beliefID, action).Scan(&intentState)
+	if err != nil {
+		result.Success = false
+		result.Error = fmt.Sprintf("intent not found: %v", err)
+		return result, nil
+	}
+	if intentState != "live" {
+		result.Allowed = false
+		result.Error = fmt.Sprintf("intent state is %q, not live", intentState)
+		return result, nil
+	}
+
+	// 5. Reconstruct execution params from snapshot (already in AuthorizeResult).
+	var snapParams map[string]interface{}
+	if err := json.Unmarshal(decision.ConsequenceParameters, &snapParams); err != nil {
+		result.Success = false
+		result.Error = fmt.Sprintf("unmarshal snapshot params: %v", err)
+		return result, nil
+	}
+
+	execParams := map[string]interface{}{
+		"repo":     snapParams["repo"],
+		"workflow": snapParams["workflow"],
+		"ref":      snapParams["ref"],
+	}
+
+	// 6. Log authorization granted before execution.
 	s.audit.Log(ctx, &audit.ActivityEntry{
 		ScenarioID: scenarioID,
 		Type:       audit.ActivityAdapterInvoked,
@@ -216,14 +283,20 @@ func (s *Service) ExecuteAction(
 		Details: map[string]interface{}{
 			"target_id": targetID,
 			"action":    action,
-			"tool":      toolName,
+			"tool":      executorName,
 		},
 	})
 
-	// 5. Execute.
-	output, execErr := fn(ctx, params)
+	// 6b. Test synchronization point (nil in production).
+	if s.beforeExecute != nil {
+		s.beforeExecute()
+	}
+
+	// 7. Execute.
+	output, execErr := fn(ctx, execParams)
 
 	if execErr != nil {
+		// Provider rejected/errored.
 		result.Success = false
 		result.Error = execErr.Error()
 		s.audit.Log(ctx, &audit.ActivityEntry{
@@ -237,21 +310,45 @@ func (s *Service) ExecuteAction(
 				"error":     execErr.Error(),
 			},
 		})
-	} else {
-		result.Success = true
-		result.Output = output
+		return result, nil
+	}
+
+	// Provider accepted. Execution result is truthful.
+	result.Success = true
+	result.Output = output
+
+	// 8. Attempt to persist the execution fact.
+	if err := s.kern.CompleteIntent(ctx, scenarioID, intentID); err != nil {
+		// Persistence failure. Provider DID accept. Result remains truthful.
+		// Intent may remain 'live' — known v1 duplicate-execution risk.
 		s.audit.Log(ctx, &audit.ActivityEntry{
 			ScenarioID: scenarioID,
-			Type:       audit.ActivityExecutorCompleted,
+			Type:       audit.ActivityIntentCompletionFailed,
 			ActorID:    actorID,
 			SubjectID:  beliefID,
 			Details: map[string]interface{}{
 				"target_id": targetID,
 				"action":    action,
+				"intent_id": intentID,
+				"error":     err.Error(),
+				"note":      "provider accepted but intent state not persisted",
 			},
 		})
+		return result, nil
 	}
 
+	// Persistence succeeded.
+	s.audit.Log(ctx, &audit.ActivityEntry{
+		ScenarioID: scenarioID,
+		Type:       audit.ActivityExecutorCompleted,
+		ActorID:    actorID,
+		SubjectID:  beliefID,
+		Details: map[string]interface{}{
+			"target_id": targetID,
+			"action":    action,
+			"intent_id": intentID,
+		},
+	})
 	return result, nil
 }
 

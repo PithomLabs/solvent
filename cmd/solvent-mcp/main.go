@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/PithomLabs/solvent/adapter/github"
 	"github.com/PithomLabs/solvent/kernel"
 	"github.com/PithomLabs/solvent/service/audit"
 	"github.com/PithomLabs/solvent/service/authority"
@@ -119,11 +120,17 @@ func main() {
 	// 8. Initialize services.
 	policySvc := policy.New(db)
 	auditSvc := audit.New(db)
-	// Executor registry is instantiated but empty. No production executor
-	// exists. This is the future wiring point for real execution. When
-	// execution is introduced, register executors here and they will be
-	// reachable via ExecuteAction → kernel.Authorize → Executor.
 	execReg := executor.NewRegistry()
+
+	// Register GitHub executor if GITHUB_TOKEN is configured.
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		provider := github.NewHTTPProvider(token)
+		github.RegisterExecutor(execReg, provider)
+		log.Info("github executor registered", "action", "deploy")
+	} else {
+		log.Info("github executor not registered (GITHUB_TOKEN not set)")
+	}
+
 	authSvc = authority.New(db, policySvc, auditSvc, execReg)
 	ledgerSvc = ledger.New(db, auditSvc)
 

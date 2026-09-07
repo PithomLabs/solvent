@@ -156,7 +156,7 @@ func TestExecuteActionNotCallerInjected(t *testing.T) {
 	// this test will fail to compile.
 	//
 	// The actual signature is:
-	//   ExecuteAction(ctx, scenarioID, beliefID, action, targetID, actorID, params)
+	//   ExecuteAction(ctx, scenarioID, beliefID, action, targetID, actorID, intentID, params, consequenceType, consequenceParameters)
 	//
 	// NOT:
 	//   ExecuteAction(ctx, ..., executorFn func(...))

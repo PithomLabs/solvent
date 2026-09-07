@@ -49,11 +49,12 @@ const (
 	ActivityAuthorizationDenied   ActivityType = "authorization_denied"
 
 	// Execution lifecycle.
-	ActivityAdapterInvoked   ActivityType = "adapter_invoked"
-	ActivityProviderResponded ActivityType = "provider_responded"
-	ActivityExecutorCompleted ActivityType = "executor_completed"
-	ActivityExecutorFailed    ActivityType = "executor_failed"
-	ActivityExecutorDenied    ActivityType = "executor_denied"
+	ActivityAdapterInvoked      ActivityType = "adapter_invoked"
+	ActivityProviderResponded   ActivityType = "provider_responded"
+	ActivityExecutorCompleted   ActivityType = "executor_completed"
+	ActivityExecutorFailed      ActivityType = "executor_failed"
+	ActivityExecutorDenied      ActivityType = "executor_denied"
+	ActivityIntentCompletionFailed ActivityType = "intent_completion_failed"
 )
 
 // ActivityEntry is one row in the activity ledger.

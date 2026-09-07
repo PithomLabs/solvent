@@ -28,9 +28,10 @@ type AuthorityTuple struct {
 
 // AuthorizeResult is the read-only authority verification outcome.
 type AuthorizeResult struct {
-	Allowed     bool
-	Reason      string
-	IntentState string // populated by AuthorizeAndCreateIntent on success
+	Allowed               bool
+	Reason                string
+	IntentState           string // populated by AuthorizeAndCreateIntent on success
+	ConsequenceParameters []byte // populated by Authorize — the snapshot's approved params
 }
 
 // authorityTarget is the internal representation of an authority_target row.
@@ -427,7 +428,7 @@ func authorizeWithinTx(ctx context.Context, tx *sql.Tx, targetID string, tuple A
 		}
 	}
 
-	return AuthorizeResult{Allowed: true, Reason: ""}, nil
+	return AuthorizeResult{Allowed: true, Reason: "", ConsequenceParameters: snapConsequenceParams}, nil
 }
 
 // Authorize is READ-ONLY. It verifies existing authority without creating
@@ -506,6 +507,19 @@ func (s *Store) AuthorizeAndCreateIntent(
 		return AuthorizeResult{}, err
 	}
 	return result, nil
+}
+
+// CompleteIntent transitions a live intent to 'executed'. It is idempotent:
+// completing an already-executed intent is a no-op (zero rows affected).
+//
+// This method is called by the service layer after a provider accepts an
+// execution request. The intent must have been created by AuthorizeAndCreateIntent
+// and must still be in 'live' state.
+func (s *Store) CompleteIntent(ctx context.Context, scenarioID, intentID string) error {
+	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, sqlCompleteIntent, intentID, scenarioID)
+		return err
+	})
 }
 
 // RevokeTarget inserts a target_revocation row. It serializes against concurrent

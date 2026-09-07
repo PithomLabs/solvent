@@ -191,6 +191,10 @@ const (
 	sqlDischargeRetireDebt = `
 		UPDATE belief SET debt = array_remove(debt, $2::STRING)
 		WHERE id = $1::UUID`
+
+	sqlCompleteIntent = `
+		UPDATE action_intent SET state = 'executed'
+		WHERE id = $1::UUID AND scenario_id = $2::UUID AND state = 'live'`
 )
 
 // NamedSQL pairs a statement with a stable name.
@@ -222,6 +226,7 @@ func SQLCatalog() []NamedSQL {
 		{"attach_justification_lock", sqlAttachJustificationLock},
 		{"audit_live_on_nonpromoted", sqlAuditLiveOnNonPromoted},
 		{"authorize_resolve", sqlAuthorizeResolve},
+		{"complete_intent", sqlCompleteIntent},
 		{"create_principal", sqlCreatePrincipal},
 		{"create_target", sqlCreateTarget},
 		{"discharge_insert", sqlDischargeInsert},

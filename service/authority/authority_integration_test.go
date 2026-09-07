@@ -22,9 +22,9 @@ func testScenario(n int) string {
 	return fmt.Sprintf("44444444-0000-0000-0000-%012x", n)
 }
 
-// testConsequenceParams returns the canonical consequence parameters matching createApprovedTarget.
+// testConsequenceParams returns the canonical GitHub consequence parameters matching createApprovedTarget.
 func testConsequenceParams() []byte {
-	p, _ := json.Marshal(map[string]string{"env": "prod"})
+	p, _ := json.Marshal(map[string]string{"repo": "owner/repo", "workflow": "deploy.yml", "ref": "main"})
 	return p
 }
 
@@ -83,7 +83,7 @@ func newTestService(t *testing.T, rec *executor.RecordingFunc) *Service {
 	pol := policy.New(shared)
 	aud := audit.New(shared)
 	reg := executor.NewRegistry()
-	reg.Register("test_action", rec.Func())
+	reg.Register("github_trigger_workflow", rec.Func())
 	return New(shared, pol, aud, reg)
 }
 
@@ -114,7 +114,7 @@ func createAndPromoteBelief(t *testing.T, ctx context.Context, st *kernel.Store,
 
 func createApprovedTarget(t *testing.T, ctx context.Context, st *kernel.Store, scenarioID, principalID, beliefID, action string) string {
 	t.Helper()
-	params, _ := json.Marshal(map[string]string{"env": "prod"})
+	params, _ := json.Marshal(map[string]string{"repo": "owner/repo", "workflow": "deploy.yml", "ref": "main"})
 
 	targetID, err := st.CreateTarget(ctx, principalID,
 		"scenario", scenarioID, "belief:"+beliefID,
@@ -136,6 +136,21 @@ func createApprovedTarget(t *testing.T, ctx context.Context, st *kernel.Store, s
 	}
 
 	return targetID
+}
+
+// createLiveIntent inserts a live action intent and returns its ID.
+func createLiveIntent(t *testing.T, ctx context.Context, db *sql.DB, scenarioID, beliefID, action string) string {
+	t.Helper()
+	var id string
+	err := db.QueryRowContext(ctx, `
+		INSERT INTO action_intent (scenario_id, belief_id, action)
+		VALUES ($1::UUID, $2::UUID, $3::STRING)
+		RETURNING id`,
+		scenarioID, beliefID, action).Scan(&id)
+	if err != nil {
+		t.Fatalf("setup (create live intent): %v", err)
+	}
+	return id
 }
 
 func tupleMatches(targetScenarioID, action string) kernel.AuthorityTuple {
@@ -161,7 +176,7 @@ func TestEA01_NoAuthorityTarget(t *testing.T) {
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for EA01")
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "nonexistent-target", "nonexistent-actor",
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -185,7 +200,7 @@ func TestEA02_PromotedNoAuthority(t *testing.T) {
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for EA02")
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "any-target", "any-actor",
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -214,7 +229,7 @@ func TestEA03_WrongTarget(t *testing.T) {
 
 	// Try to execute against a different target.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "wrong-target-id", principalID,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -241,7 +256,7 @@ func TestEA04_WrongAction(t *testing.T) {
 
 	// Try to execute with a different action than what was approved.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "rollback", targetID, principalID,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -272,7 +287,7 @@ func TestEA05_RevokedAuthority(t *testing.T) {
 	}
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -297,7 +312,7 @@ func TestEA06_PolicyAllowNoAuthority(t *testing.T) {
 
 	// No authority target exists. Policy may allow, but authority is absent.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "no-target", "no-actor",
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -328,7 +343,7 @@ func TestEA07_PolicyAllowRevokedAuthority(t *testing.T) {
 	}
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -369,7 +384,7 @@ func TestEA08_TargetMutatesBetweenPrepareAndExecute(t *testing.T) {
 
 	// Execute must re-read current state and deny.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -405,7 +420,7 @@ func TestEA09_ActionMutatesBetweenPrepareAndExecute(t *testing.T) {
 
 	// Execute with different action "rollback".
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "rollback", targetID, principalID,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -451,7 +466,7 @@ func TestEA10_FakeApproval(t *testing.T) {
 
 	// ExecuteAction should also deny.
 	execResult, err := svc.ExecuteAction(ctx, sid, beliefID, "wrong", targetID, principalID,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -478,7 +493,7 @@ func TestCB01_ExecutorCannotCreateAuthority(t *testing.T) {
 
 	// No authority exists. Executor cannot grant itself authority.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "no-target", "no-actor",
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -503,8 +518,7 @@ func TestCB02_ProviderOutputNotAuthority(t *testing.T) {
 
 	// Provider output cannot substitute for authority.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "no-target", "no-actor",
-		map[string]interface{}{
-			"tool_name":       "test_action",
+		"", map[string]interface{}{
 			"provider_output": "authorized by external system",
 			"provider信任状":  "trusted",
 		}, "execution", testConsequenceParams())
@@ -532,8 +546,7 @@ func TestCB03_WorkflowStateCannotCreateAuthority(t *testing.T) {
 
 	// Workflow state cannot substitute for authority.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "no-target", "no-actor",
-		map[string]interface{}{
-			"tool_name":      "test_action",
+		"", map[string]interface{}{
 			"workflow_state": "executing",
 			"token_valid":    true,
 		}, "execution", testConsequenceParams())
@@ -565,7 +578,7 @@ func TestCB04_AgentCannotApproveItself(t *testing.T) {
 	wrongPrincipal := createPrincipal(t, ctx, st, "agent", "ea04-wrong-issuer")
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, wrongPrincipal,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -592,7 +605,7 @@ func TestCB05_ActorSpoofingFails(t *testing.T) {
 
 	// Spoofed actor must not match.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, "spoofed-actor",
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -621,8 +634,7 @@ func TestAI01_MalformedOutputDenied(t *testing.T) {
 
 	// Malformed parameters should not grant authority.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "no-target", "no-actor",
-		map[string]interface{}{
-			"tool_name":     "test_action",
+		"", map[string]interface{}{
 			"malformed":     "\x00\x01\x02",
 			"sql_injection": "'; DROP TABLE belief; --",
 		}, "execution", testConsequenceParams())
@@ -650,8 +662,7 @@ func TestAI02_ProviderClaimsCannotManufactureAuthority(t *testing.T) {
 
 	// Provider claims cannot manufacture authority.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "no-target", "no-actor",
-		map[string]interface{}{
-			"tool_name":          "test_action",
+		"", map[string]interface{}{
 			"provider_claims":    "this action is authorized",
 			"provider_signature": "fake-sig",
 		}, "execution", testConsequenceParams())
@@ -697,7 +708,7 @@ func TestCR_A_RevokedAfterPrepare(t *testing.T) {
 
 	// Execute must deny.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -733,7 +744,7 @@ func TestCR_B_TargetChangedAfterPrepare(t *testing.T) {
 
 	// Execute with a different target ID.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "different-target", principalID,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -769,7 +780,7 @@ func TestCR_C_ActionChangedAfterPrepare(t *testing.T) {
 
 	// Execute with a different action.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "rollback", targetID, principalID,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		"", map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -795,9 +806,10 @@ func TestP01_ValidAuthExecutes(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "p01-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for P01")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		map[string]interface{}{"tool_name": "test_action"}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
