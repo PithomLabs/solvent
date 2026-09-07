@@ -23,6 +23,7 @@ var schemaPaths = []string{
 	"../../db/005_authority_mvp.sql",
 	"../../db/006_authority_justification_cascade.sql",
 	"../../db/007_service_tables.sql",
+	"../../db/008_executing_state.sql",
 }
 
 // Scenario namespace for this package. 1111..6666 belong to the kernel, belief,

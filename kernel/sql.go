@@ -192,9 +192,21 @@ const (
 		UPDATE belief SET debt = array_remove(debt, $2::STRING)
 		WHERE id = $1::UUID`
 
+	sqlClaimIntent = `
+		UPDATE action_intent SET state = 'executing'
+		WHERE id = $1::UUID AND scenario_id = $2::UUID AND state = 'live'`
+
 	sqlCompleteIntent = `
 		UPDATE action_intent SET state = 'executed'
-		WHERE id = $1::UUID AND scenario_id = $2::UUID AND state = 'live'`
+		WHERE id = $1::UUID AND scenario_id = $2::UUID AND state = 'executing'`
+
+	sqlRollbackClaim = `
+		UPDATE action_intent SET state = 'live'
+		WHERE id = $1::UUID AND scenario_id = $2::UUID AND state = 'executing'`
+
+	sqlCancelIntent = `
+		UPDATE action_intent SET state = 'cancelled'
+		WHERE id = $1::UUID AND scenario_id = $2::UUID AND state = 'executing'`
 )
 
 // NamedSQL pairs a statement with a stable name.
@@ -226,6 +238,8 @@ func SQLCatalog() []NamedSQL {
 		{"attach_justification_lock", sqlAttachJustificationLock},
 		{"audit_live_on_nonpromoted", sqlAuditLiveOnNonPromoted},
 		{"authorize_resolve", sqlAuthorizeResolve},
+		{"cancel_intent", sqlCancelIntent},
+		{"claim_intent", sqlClaimIntent},
 		{"complete_intent", sqlCompleteIntent},
 		{"create_principal", sqlCreatePrincipal},
 		{"create_target", sqlCreateTarget},
@@ -241,6 +255,7 @@ func SQLCatalog() []NamedSQL {
 		{"revoke_target", sqlRevokeTarget},
 		{"retract_cascade_cancel", sqlRetractCascadeCancel},
 		{"retract_cascade_retract", sqlRetractCascadeRetract},
+		{"rollback_claim", sqlRollbackClaim},
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

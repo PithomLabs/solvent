@@ -241,6 +241,18 @@ func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[stri
 		return errorResult(fmt.Errorf("belief %s not found in scenario %s", beliefID, scenario)), nil
 	}
 
+	// Read the target's approved snapshot consequence_parameters.
+	// Falls back to empty params when target is not activated — let authority deny.
+	var snapParams []byte
+	err = db.QueryRowContext(ctx, `
+		SELECT ts.consequence_parameters
+		FROM target_activation ta
+		JOIN target_snapshot ts ON ts.target_id = ta.target_id AND ts.snapshot_id = ta.snapshot_id
+		WHERE ta.target_id = $1::UUID`, targetID).Scan(&snapParams)
+	if err != nil {
+		snapParams = []byte("{}")
+	}
+
 	// Atomic authorization + intent creation. Authority evaluation and intent
 	// creation occur in one SERIALIZABLE transaction — no race window between
 	// verification and creation. This replaces the previous two-step path.
@@ -252,7 +264,7 @@ func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[stri
 		ActionNamespace:       "solvent",
 		ActionName:            action,
 		ConsequenceType:       "execution",
-		ConsequenceParameters: []byte("{}"),
+		ConsequenceParameters: snapParams,
 	}
 
 	decision, err := ledgerSvc.AuthorizeAndCreateIntent(ctx, scenarioID, beliefID, action, targetID, actorID, tuple)

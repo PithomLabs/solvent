@@ -108,6 +108,18 @@ func (s *Server) handleAuthorizeAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read the target's approved snapshot consequence_parameters.
+	// Falls back to empty params when target is not activated — let authority deny.
+	var snapParams []byte
+	err := s.db.QueryRowContext(r.Context(), `
+		SELECT ts.consequence_parameters
+		FROM target_activation ta
+		JOIN target_snapshot ts ON ts.target_id = ta.target_id AND ts.snapshot_id = ta.snapshot_id
+		WHERE ta.target_id = $1::UUID`, req.TargetID).Scan(&snapParams)
+	if err != nil {
+		snapParams = []byte("{}")
+	}
+
 	tuple := kernel.AuthorityTuple{
 		PrincipalID:           effectiveActor,
 		ResourceType:          "scenario",
@@ -116,7 +128,7 @@ func (s *Server) handleAuthorizeAction(w http.ResponseWriter, r *http.Request) {
 		ActionNamespace:       "solvent",
 		ActionName:            req.Action,
 		ConsequenceType:       "execution",
-		ConsequenceParameters: []byte("{}"),
+		ConsequenceParameters: snapParams,
 	}
 
 	decision, err := s.ledger.AuthorizeAndCreateIntent(r.Context(),

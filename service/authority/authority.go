@@ -16,6 +16,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -48,32 +49,53 @@ type ExecutionResult struct {
 	ExecutedAt time.Time `json:"executed_at"`
 }
 
+// IntentOutcome classifies the operator's reconciliation decision.
+type IntentOutcome int
+
+const (
+	// IntentOutcomeCompleted means the operator verified the provider accepted.
+	// Transition: executing → executed (via CompleteIntent).
+	IntentOutcomeCompleted IntentOutcome = iota
+
+	// IntentOutcomeFailed means the operator verified the provider rejected.
+	// Transition: executing → live (via RollbackClaim). Retry is safe.
+	IntentOutcomeFailed
+
+	// IntentOutcomeCancelled means the operator decides not to retry.
+	// Transition: executing → cancelled (via CancelIntent).
+	IntentOutcomeCancelled
+)
+
 // auditLogger is the minimal audit interface used by the authority service.
 // *audit.Service satisfies this interface.
 type auditLogger interface {
 	Log(ctx context.Context, entry *audit.ActivityEntry) error
 }
 
-// testHook is called after final authorization and intent-state verification
-// but before executor invocation. nil in production.
-type testHook func()
+// providerClassifier is satisfied by adapter errors that carry a classified
+// provider outcome. The adapter defines the outcome constants; the service
+// maps them to kernel transitions by numeric code. This avoids importing the
+// adapter package, which would create an import cycle in tests.
+type providerClassifier interface {
+	error
+	ProviderOutcomeCode() int
+}
+
+// Provider outcome codes — must match adapter/github.ProviderOutcome values.
+const (
+	outcomeAccepted  = 0 // ProviderAccepted
+	outcomeRejected  = 1 // ProviderRejected
+	outcomeAmbiguous = 2 // ProviderAmbiguous
+)
 
 // Service manages the authority boundary. It is the ONE production path for
 // consequential external execution.
 type Service struct {
-	db           *sql.DB
-	kern         *kernel.Store
-	policy       *policy.Service
-	audit        auditLogger
-	execReg      *executor.Registry
-	beforeExecute testHook
-}
-
-// SetTestHook installs a deterministic synchronization hook for testing.
-// The hook fires after authorization and intent-state verification,
-// immediately before executor invocation. nil in production.
-func (s *Service) SetTestHook(hook testHook) {
-	s.beforeExecute = hook
+	db      *sql.DB
+	kern    *kernel.Store
+	policy  *policy.Service
+	audit   auditLogger
+	execReg *executor.Registry
 }
 
 // New creates a new authority Service.
@@ -184,11 +206,24 @@ func (s *Service) PrepareForAction(
 // The caller supplies action parameters but NEVER the execution implementation.
 // The executor is resolved internally from the trusted registry.
 //
+// Step ordering (Option A — accept Authorize→Claim race):
+//  1. PrepareForAction (kernel.Authorize)       — re-reads current state
+//  2. Refuse if not allowed                     — unchanged
+//  3. Resolve executor                          — unchanged
+//  4. Reconstruct execution params from snapshot — BEFORE claim (can fail locally)
+//  5. Validate execution params                  — BEFORE claim
+//  6. ClaimIntent (atomic CAS live→executing)    — sole authority gate
+//  7. Log adapter_invoked                        — unchanged
+//  8. Execute provider                           — unchanged
+//  9. Map provider outcome to kernel transitions  — NEW
+//
 // Security invariants enforced:
 //   - PrepareForAction re-reads current state (no cached authority).
 //   - kernel.Authorize is called immediately before execution.
 //   - The executor is from the internal registry, not caller-supplied.
 //   - Authorization and execution outcomes are logged separately.
+//   - ClaimIntent is the sole authoritative ownership gate (CI-4).
+//   - Provider outcome classification is adapter-specific (CI-9).
 func (s *Service) ExecuteAction(
 	ctx context.Context,
 	scenarioID, beliefID, action, targetID, actorID string,
@@ -242,25 +277,8 @@ func (s *Service) ExecuteAction(
 		return result, nil
 	}
 
-	// 4. Verify exact intent is live (one DB read between T2 and T3).
-	var intentState string
-	err = s.db.QueryRowContext(ctx, `
-		SELECT state FROM action_intent
-		WHERE id = $1::UUID AND scenario_id = $2::UUID
-		  AND belief_id = $3::UUID AND action = $4`,
-		intentID, scenarioID, beliefID, action).Scan(&intentState)
-	if err != nil {
-		result.Success = false
-		result.Error = fmt.Sprintf("intent not found: %v", err)
-		return result, nil
-	}
-	if intentState != "live" {
-		result.Allowed = false
-		result.Error = fmt.Sprintf("intent state is %q, not live", intentState)
-		return result, nil
-	}
-
-	// 5. Reconstruct execution params from snapshot (already in AuthorizeResult).
+	// 4. Reconstruct execution params from snapshot (already in AuthorizeResult).
+	//    This happens BEFORE ClaimIntent — can fail locally without holding the claim.
 	var snapParams map[string]interface{}
 	if err := json.Unmarshal(decision.ConsequenceParameters, &snapParams); err != nil {
 		result.Success = false
@@ -274,7 +292,23 @@ func (s *Service) ExecuteAction(
 		"ref":      snapParams["ref"],
 	}
 
-	// 6. Log authorization granted before execution.
+	// 5. Validate execution params (can fail locally).
+	if execParams["repo"] == nil || execParams["workflow"] == nil || execParams["ref"] == nil {
+		result.Success = false
+		result.Error = "missing required execution params in snapshot"
+		return result, nil
+	}
+
+	// 6. ClaimIntent — atomic CAS live→executing. Sole authority gate (CI-4).
+	if intentID != "" {
+		if err := s.kern.ClaimIntent(ctx, scenarioID, intentID); err != nil {
+			result.Allowed = false
+			result.Error = fmt.Sprintf("claim intent: %v", err)
+			return result, nil
+		}
+	}
+
+	// 7. Log adapter_invoked.
 	s.audit.Log(ctx, &audit.ActivityEntry{
 		ScenarioID: scenarioID,
 		Type:       audit.ActivityAdapterInvoked,
@@ -287,54 +321,100 @@ func (s *Service) ExecuteAction(
 		},
 	})
 
-	// 6b. Test synchronization point (nil in production).
-	if s.beforeExecute != nil {
-		s.beforeExecute()
-	}
-
-	// 7. Execute.
+	// 8. Execute.
 	output, execErr := fn(ctx, execParams)
 
 	if execErr != nil {
-		// Provider rejected/errored.
-		result.Success = false
-		result.Error = execErr.Error()
-		s.audit.Log(ctx, &audit.ActivityEntry{
-			ScenarioID: scenarioID,
-			Type:       audit.ActivityExecutorFailed,
-			ActorID:    actorID,
-			SubjectID:  beliefID,
-			Details: map[string]interface{}{
-				"target_id": targetID,
-				"action":    action,
-				"error":     execErr.Error(),
-			},
-		})
-		return result, nil
+		// 9. Map provider outcome to kernel transitions (CI-8, CI-9).
+		var pc providerClassifier
+		if errors.As(execErr, &pc) {
+			switch pc.ProviderOutcomeCode() {
+			case outcomeAccepted:
+				// Provider accepted despite error response. Treated as success.
+				result.Success = true
+				result.Output = output
+				// Fall through to CompleteIntent below.
+
+			case outcomeRejected:
+				// Definitive rejection. Rollback claim, allow retry.
+				if intentID != "" {
+					_ = s.kern.RollbackClaim(ctx, scenarioID, intentID)
+				}
+				result.Success = false
+				result.Error = execErr.Error()
+				s.audit.Log(ctx, &audit.ActivityEntry{
+					ScenarioID: scenarioID,
+					Type:       audit.ActivityExecutorFailed,
+					ActorID:    actorID,
+					SubjectID:  beliefID,
+					Details: map[string]interface{}{
+						"target_id": targetID,
+						"action":    action,
+						"error":     execErr.Error(),
+					},
+				})
+				return result, nil
+
+			case outcomeAmbiguous:
+				// Unknown outcome. Leave intent as executing. No retry (CI-5).
+				result.Success = false
+				result.Error = execErr.Error()
+				s.audit.Log(ctx, &audit.ActivityEntry{
+					ScenarioID: scenarioID,
+					Type:       audit.ActivityExecutorFailed,
+					ActorID:    actorID,
+					SubjectID:  beliefID,
+					Details: map[string]interface{}{
+						"target_id": targetID,
+						"action":    action,
+						"error":     execErr.Error(),
+					},
+				})
+				return result, nil
+			}
+		} else {
+			// Non-provider error (e.g., executor registration issue).
+			// Provider was never invoked. Treat as definitive rejection.
+			result.Success = false
+			result.Error = execErr.Error()
+			s.audit.Log(ctx, &audit.ActivityEntry{
+				ScenarioID: scenarioID,
+				Type:       audit.ActivityExecutorFailed,
+				ActorID:    actorID,
+				SubjectID:  beliefID,
+				Details: map[string]interface{}{
+					"target_id": targetID,
+					"action":    action,
+					"error":     execErr.Error(),
+				},
+			})
+			return result, nil
+		}
+	} else {
+		// Provider accepted (no error). Set success.
+		result.Success = true
+		result.Output = output
 	}
 
-	// Provider accepted. Execution result is truthful.
-	result.Success = true
-	result.Output = output
-
-	// 8. Attempt to persist the execution fact.
-	if err := s.kern.CompleteIntent(ctx, scenarioID, intentID); err != nil {
-		// Persistence failure. Provider DID accept. Result remains truthful.
-		// Intent may remain 'live' — known v1 duplicate-execution risk.
-		s.audit.Log(ctx, &audit.ActivityEntry{
-			ScenarioID: scenarioID,
-			Type:       audit.ActivityIntentCompletionFailed,
-			ActorID:    actorID,
-			SubjectID:  beliefID,
-			Details: map[string]interface{}{
-				"target_id": targetID,
-				"action":    action,
-				"intent_id": intentID,
-				"error":     err.Error(),
-				"note":      "provider accepted but intent state not persisted",
-			},
-		})
-		return result, nil
+	// Provider accepted. CompleteIntent (executing→executed).
+	if intentID != "" {
+		if err := s.kern.CompleteIntent(ctx, scenarioID, intentID); err != nil {
+			// Persistence failure. Provider DID accept. Result remains truthful.
+			s.audit.Log(ctx, &audit.ActivityEntry{
+				ScenarioID: scenarioID,
+				Type:       audit.ActivityIntentCompletionFailed,
+				ActorID:    actorID,
+				SubjectID:  beliefID,
+				Details: map[string]interface{}{
+					"target_id": targetID,
+					"action":    action,
+					"intent_id": intentID,
+					"error":     err.Error(),
+					"note":      "provider accepted but intent state not persisted",
+				},
+			})
+			return result, nil
+		}
 	}
 
 	// Persistence succeeded.
@@ -350,6 +430,30 @@ func (s *Service) ExecuteAction(
 		},
 	})
 	return result, nil
+}
+
+// ReconcileIntent resolves an ambiguous 'executing' intent.
+// This is a privileged operation requiring authenticated operator authority.
+//
+// Precondition: intent must currently be in 'executing' state.
+// Returns ErrNotExecuting if the intent is not in 'executing' state.
+//
+// The caller MUST have verified the external provider state before calling.
+// This method does NOT verify provider state — it trusts the caller's
+// external verification, but enforces the source-state predicate atomically (CI-10).
+//
+// Reconciliation is an operator execution-control operation, not a public API.
+func (s *Service) ReconcileIntent(ctx context.Context, scenarioID, intentID string, outcome IntentOutcome, operatorID string) error {
+	switch outcome {
+	case IntentOutcomeCompleted:
+		return s.kern.CompleteIntent(ctx, scenarioID, intentID)
+	case IntentOutcomeFailed:
+		return s.kern.RollbackClaim(ctx, scenarioID, intentID)
+	case IntentOutcomeCancelled:
+		return s.kern.CancelIntent(ctx, scenarioID, intentID)
+	default:
+		return fmt.Errorf("unknown outcome: %d", outcome)
+	}
 }
 
 // getBeliefStatus reads the current belief status from the database.

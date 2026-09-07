@@ -37,6 +37,10 @@ const (
 	corpusSchemaPath    = "db/002_corpus.sql"
 	wizardSchemaPath    = "db/003_wizard.sql"
 	debtSchemaPath      = "db/004_debt_vocabulary.sql"
+	authoritySchemaPath = "db/005_authority_mvp.sql"
+	cascadeSchemaPath   = "db/006_authority_justification_cascade.sql"
+	serviceSchemaPath   = "db/007_service_tables.sql"
+	executingSchemaPath = "db/008_executing_state.sql"
 	fixtureDir          = "internal/derive/testdata/etcd_real/track2"
 )
 
@@ -71,13 +75,13 @@ func main() {
 	// frozen DDL comes first and 003 comes last.
 	if tablesExist(ctx, db) {
 		fmt.Println("Base tables present. Ensuring corpus and wizard schema are current...")
-		if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath, wizardSchemaPath, debtSchemaPath); err != nil {
+		if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath, wizardSchemaPath, debtSchemaPath, authoritySchemaPath, cascadeSchemaPath, serviceSchemaPath, executingSchemaPath); err != nil {
 			log.Fatalf("apply corpus/wizard schema: %v", err)
 		}
 	} else {
 		fmt.Println("No tables found. Applying schema...")
 		db.Close()
-		if err := testdb.ApplySchema(ctx, dsn, schemaPath, corpusSchemaPath, wizardSchemaPath, debtSchemaPath); err != nil {
+		if err := testdb.ApplySchema(ctx, dsn, schemaPath, corpusSchemaPath, wizardSchemaPath, debtSchemaPath, authoritySchemaPath, cascadeSchemaPath, serviceSchemaPath, executingSchemaPath); err != nil {
 			log.Fatalf("apply schema: %v", err)
 		}
 		db, err = testdb.Open(dsn)
