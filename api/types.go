@@ -190,6 +190,34 @@ type AuthorizeActionResult struct {
 	Authority   AuthResult `json:"authority"`
 }
 
+// --- Execution types ---
+
+// ExecuteActionRequest is the request body for POST /v1/authorizations/execute.
+// The authenticated principal is derived from the API key, not from the request body.
+// consequence_parameters are read from the approved snapshot, not from the caller.
+type ExecuteActionRequest struct {
+	ScenarioID      string `json:"scenario_id"`
+	BeliefID        string `json:"belief_id"`
+	Action          string `json:"action"`
+	TargetID        string `json:"target_id"`
+	IntentID        string `json:"intent_id"`
+	ConsequenceType string `json:"consequence_type"`
+}
+
+// ExecuteActionResult is the response for execute-action.
+type ExecuteActionResult struct {
+	BeliefID    string    `json:"belief_id"`
+	IntentID    string    `json:"intent_id,omitempty"`
+	IntentState string    `json:"intent_state,omitempty"`
+	Action      string    `json:"action"`
+	Allowed     bool      `json:"allowed"`
+	Success     bool      `json:"success"`
+	Output      string    `json:"output,omitempty"`
+	Error       string    `json:"error,omitempty"`
+	Reason      string    `json:"reason,omitempty"`
+	ExecutedAt  time.Time `json:"executed_at"`
+}
+
 // --- Discharge types ---
 
 // DischargeRequest is the request body for POST /v1/discharge.

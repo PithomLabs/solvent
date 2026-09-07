@@ -43,6 +43,9 @@ var (
 	// authSvc is the authority service, initialized after DB connection.
 	authSvc *authority.Service
 
+	// auditSvc is the audit service, initialized after DB connection.
+	auditSvc *audit.Service
+
 	// ledgerSvc is the API ledger service, initialized after DB connection.
 	ledgerSvc *ledger.Service
 )
@@ -119,7 +122,7 @@ func main() {
 
 	// 8. Initialize services.
 	policySvc := policy.New(db)
-	auditSvc := audit.New(db)
+	auditSvc = audit.New(db)
 	execReg := executor.NewRegistry()
 
 	// Register GitHub executor if GITHUB_TOKEN is configured.
@@ -136,9 +139,10 @@ func main() {
 
 	log.Info("solvent-mcp starting",
 		"version", "v0.1.0",
-		"tools", 16,
+		"tools", 18,
 		"dsn_configured", dsn != "",
 		"database_connected", true,
+		"github_executor", os.Getenv("GITHUB_TOKEN") != "",
 	)
 
 	// 8. Create MCP server.
@@ -567,6 +571,68 @@ func main() {
 		},
 	}, toolHandler("solvent_discharge"))
 
+	// --- execution tools ---
+
+	server.AddTool(&mcp.Tool{
+		Name:        "solvent_execute",
+		Description: "Execute an authorized action: claim a live intent, invoke the configured executor with the approved snapshot parameters, and record the outcome. The snapshot consequence_parameters are authoritative — caller-supplied parameters are ignored. Provider acceptance does not mean workflow completion.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"scenario": map[string]any{
+					"type":        "string",
+					"enum":        scenarioNames(),
+					"description": "Scenario the belief belongs to",
+				},
+				"belief_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the promoted belief authorizing the action",
+				},
+				"action": map[string]any{
+					"type":        "string",
+					"description": "Action to execute (must match the authorized action)",
+				},
+				"target_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the authority target with approved snapshot",
+				},
+				"intent_id": map[string]any{
+					"type":        "string",
+					"description": "UUID of the live intent to claim and execute",
+				},
+				"actor_id": map[string]any{
+					"type":        "string",
+					"description": "Attribution for the execution (default: mcp-agent)",
+				},
+			},
+			"required": []string{"scenario", "belief_id", "action", "target_id", "intent_id"},
+		},
+	}, toolHandler("solvent_execute"))
+
+	server.AddTool(&mcp.Tool{
+		Name:        "solvent_activity",
+		Description: "Read audit activity entries for a scenario. Enforces the same scenario-scoped access as the REST activity endpoint. Returns entries in reverse chronological order.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"scenario": map[string]any{
+					"type":        "string",
+					"enum":        scenarioNames(),
+					"description": "Scenario to read activity for",
+				},
+				"type": map[string]any{
+					"type":        "string",
+					"description": "Optional: filter by activity type (e.g. authorization_granted, executor_completed)",
+				},
+				"limit": map[string]any{
+					"type":        "number",
+					"description": "Maximum entries to return (default 50)",
+				},
+			},
+			"required": []string{"scenario"},
+		},
+	}, toolHandler("solvent_activity"))
+
 	// 9. Run on stdio.
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {
 		log.Error("server failed", "error", err)
@@ -701,6 +767,10 @@ func toolHandler(name string) mcp.ToolHandler {
 			result, err = handleSolventRevokeTarget(ctx, db, args)
 		case "solvent_discharge":
 			result, err = handleSolventDischarge(ctx, db, args)
+		case "solvent_execute":
+			result, err = handleSolventExecute(ctx, db, args)
+		case "solvent_activity":
+			result, err = handleSolventActivity(ctx, db, args)
 		default:
 			result = errorResult(fmt.Errorf("unknown tool: %s", name))
 		}

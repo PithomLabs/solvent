@@ -81,6 +81,7 @@ func TestOpenAPISpec_CanonicalRoutes(t *testing.T) {
 		{"post", "/v1/targets/{id}/revoke"},
 		{"post", "/v1/authorizations/verify"},
 		{"post", "/v1/authorizations/action"},
+		{"post", "/v1/authorizations/execute"},
 		{"post", "/v1/discharge"},
 		{"get", "/v1/activity"},
 		{"get", "/v1/ledger"},
@@ -138,6 +139,7 @@ func TestOpenAPISpec_NoExtraPaths(t *testing.T) {
 		"/v1/targets/{id}/revoke":         true,
 		"/v1/authorizations/verify":       true,
 		"/v1/authorizations/action":       true,
+		"/v1/authorizations/execute":      true,
 		"/v1/discharge":                   true,
 		"/v1/activity":                    true,
 		"/v1/ledger":                      true,
@@ -177,6 +179,7 @@ func TestOpenAPISpec_MutatingEndpointsRequireBearerAuth(t *testing.T) {
 		"/v1/targets/{id}/revoke",
 		"/v1/authorizations/verify",
 		"/v1/authorizations/action",
+		"/v1/authorizations/execute",
 		"/v1/discharge",
 	}
 

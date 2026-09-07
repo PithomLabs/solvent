@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/PithomLabs/solvent/service/audit"
+	"github.com/PithomLabs/solvent/service/authority"
 	"github.com/PithomLabs/solvent/service/ledger"
 )
 
@@ -14,16 +15,31 @@ import (
 type Server struct {
 	db       *sql.DB
 	ledger   *ledger.Service
+	authSvc  *authority.Service
 	auditSvc *audit.Service
 }
 
 // NewServer creates a new API server.
-func NewServer(db *sql.DB, auditSvc *audit.Service) *Server {
+func NewServer(db *sql.DB, auditSvc *audit.Service, opts ...ServerOption) *Server {
 	ls := ledger.New(db, auditSvc)
-	return &Server{
+	s := &Server{
 		db:       db,
 		ledger:   ls,
 		auditSvc: auditSvc,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// ServerOption configures the API server.
+type ServerOption func(*Server)
+
+// WithAuthorityService wires the authority service for execution support.
+func WithAuthorityService(authSvc *authority.Service) ServerOption {
+	return func(s *Server) {
+		s.authSvc = authSvc
 	}
 }
 
@@ -63,6 +79,7 @@ func (s *Server) Handler() http.Handler {
 	// Authorization routes.
 	mux.HandleFunc("POST /v1/authorizations/verify", s.handleVerifyAuthorization)
 	mux.HandleFunc("POST /v1/authorizations/action", s.handleAuthorizeAction)
+	mux.HandleFunc("POST /v1/authorizations/execute", s.handleExecuteAction)
 
 	// Discharge route.
 	mux.HandleFunc("POST /v1/discharge", s.handleDischarge)

@@ -16,6 +16,9 @@ import (
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/kernel"
 	"github.com/PithomLabs/solvent/service/audit"
+	"github.com/PithomLabs/solvent/service/authority"
+	"github.com/PithomLabs/solvent/service/executor"
+	"github.com/PithomLabs/solvent/service/policy"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -43,6 +46,21 @@ func newTestServer(t *testing.T, db *sql.DB) *httptest.Server {
 	t.Helper()
 	auditSvc := audit.New(db)
 	server := api.NewServer(db, auditSvc)
+	keyMap := map[string]string{
+		"test-api-key-12345": testPrincipalID,
+	}
+	handler := api.AuthMiddleware(keyMap, server.Handler())
+	return httptest.NewServer(handler)
+}
+
+// newTestServerWithAuth creates a new API server with authority service for execution tests.
+func newTestServerWithAuth(t *testing.T, db *sql.DB) *httptest.Server {
+	t.Helper()
+	auditSvc := audit.New(db)
+	policySvc := policy.New(db)
+	execReg := executor.NewRegistry()
+	authSvc := authority.New(db, policySvc, auditSvc, execReg)
+	server := api.NewServer(db, auditSvc, api.WithAuthorityService(authSvc))
 	keyMap := map[string]string{
 		"test-api-key-12345": testPrincipalID,
 	}

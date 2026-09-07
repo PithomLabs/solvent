@@ -8,8 +8,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/PithomLabs/solvent/adapter/github"
 	"github.com/PithomLabs/solvent/api"
 	"github.com/PithomLabs/solvent/service/audit"
+	"github.com/PithomLabs/solvent/service/authority"
+	"github.com/PithomLabs/solvent/service/executor"
+	"github.com/PithomLabs/solvent/service/policy"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -53,7 +57,20 @@ func main() {
 	}
 
 	auditSvc := audit.New(db)
-	server := api.NewServer(db, auditSvc)
+
+	// Wire authority service for execution support.
+	policySvc := policy.New(db)
+	execReg := executor.NewRegistry()
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		provider := github.NewHTTPProvider(token)
+		github.RegisterExecutor(execReg, provider)
+		fmt.Println("solvent-api: github executor registered")
+	} else {
+		fmt.Println("solvent-api: github executor not registered (GITHUB_TOKEN not set)")
+	}
+	authSvc := authority.New(db, policySvc, auditSvc, execReg)
+
+	server := api.NewServer(db, auditSvc, api.WithAuthorityService(authSvc))
 
 	handler := api.AuthMiddleware(keyToPrincipal, server.Handler())
 
