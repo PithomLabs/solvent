@@ -13,6 +13,7 @@ import (
 	"github.com/PithomLabs/solvent/internal/pipeline"
 	"github.com/PithomLabs/solvent/internal/view"
 	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/service/audit"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -627,6 +628,124 @@ func handleSolventDischarge(ctx context.Context, db *sql.DB, args map[string]int
 		"obligation_key": obligationKey,
 		"instrument_ref": instrumentRef,
 		"discharged":     true,
+	}), nil
+}
+
+// --- execution handlers ---
+
+// handleSolventExecute claims a live intent, invokes the configured executor
+// with the approved snapshot parameters, and records the outcome.
+//
+// Security invariants:
+//   - The authenticated principal is the MCP server process (trusted local surface).
+//   - Snapshot consequence_parameters are read from the database, not from the caller.
+//   - The executor is resolved from the internal registry, not caller-supplied.
+//   - intent_id is the authoritative execution identity.
+func handleSolventExecute(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	if authSvc == nil {
+		return errorResult(fmt.Errorf("execution service not configured")), nil
+	}
+
+	scenario, _ := args["scenario"].(string)
+	scenarioID, ok := lookupScenario(scenario)
+	if !ok {
+		return errorResult(fmt.Errorf("unknown scenario: %q (valid: %s)", scenario, strings.Join(scenarioNames(), ", "))), nil
+	}
+
+	beliefID, ok := args["belief_id"].(string)
+	if !ok || beliefID == "" {
+		return errorResult(fmt.Errorf("belief_id is required and must be a string")), nil
+	}
+	action, _ := args["action"].(string)
+	targetID, _ := args["target_id"].(string)
+	intentID, _ := args["intent_id"].(string)
+
+	if targetID == "" || intentID == "" {
+		return errorResult(fmt.Errorf("target_id and intent_id are required")), nil
+	}
+	if action == "" {
+		return errorResult(fmt.Errorf("action is required")), nil
+	}
+
+	// Cross-scenario guard: verify the belief belongs to this scenario.
+	snap, err := view.GetSnapshot(ctx, db, scenarioID, view.SnapshotOpts{BeliefID: beliefID})
+	if err != nil || len(snap.Beliefs) != 1 || snap.Beliefs[0].ID != beliefID {
+		return errorResult(fmt.Errorf("belief %s not found in scenario %s", beliefID, scenario)), nil
+	}
+
+	// Read the target's approved snapshot consequence_parameters.
+	var snapParams []byte
+	err = db.QueryRowContext(ctx, `
+		SELECT ts.consequence_parameters
+		FROM target_activation ta
+		JOIN target_snapshot ts ON ts.target_id = ta.target_id AND ts.snapshot_id = ta.snapshot_id
+		WHERE ta.target_id = $1::UUID`, targetID).Scan(&snapParams)
+	if err != nil {
+		snapParams = []byte("{}")
+	}
+
+	// The MCP server is a trusted local process. actor_id is attribution input.
+	actorID, _ := args["actor_id"].(string)
+	if actorID == "" {
+		actorID = "mcp-agent"
+	}
+
+	result, err := authSvc.ExecuteAction(ctx, scenarioID, beliefID, action, targetID, actorID,
+		intentID, map[string]interface{}{}, "execution", snapParams)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	auditCount, auditErr := pipeline.AuditIntent(ctx, db, scenarioID)
+	if auditErr != nil {
+		return errorResult(auditErr), nil
+	}
+
+	return envelopeResult(db, map[string]interface{}{
+		"belief_id":   beliefID,
+		"intent_id":   intentID,
+		"action":      action,
+		"allowed":     result.Allowed,
+		"success":     result.Success,
+		"output":      result.Output,
+		"error":       result.Error,
+		"reason":      result.Reason,
+		"executed_at": result.ExecutedAt,
+	}, auditCount), nil
+}
+
+// handleSolventActivity reads audit activity entries for a scenario.
+// Enforces the same scenario-scoped access semantics as GET /v1/activity.
+func handleSolventActivity(ctx context.Context, db *sql.DB, args map[string]interface{}) (*mcp.CallToolResult, error) {
+	scenario, _ := args["scenario"].(string)
+	scenarioID, ok := lookupScenario(scenario)
+	if !ok {
+		return errorResult(fmt.Errorf("unknown scenario: %q (valid: %s)", scenario, strings.Join(scenarioNames(), ", "))), nil
+	}
+
+	if auditSvc == nil {
+		return errorResult(fmt.Errorf("audit service not available")), nil
+	}
+
+	var activityType *audit.ActivityType
+	if t, _ := args["type"].(string); t != "" {
+		at := audit.ActivityType(t)
+		activityType = &at
+	}
+
+	limit := 50
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+
+	entries, err := auditSvc.GetActivities(ctx, scenarioID, activityType, limit)
+	if err != nil {
+		return errorResult(err), nil
+	}
+
+	return jsonResult(map[string]interface{}{
+		"activities": entries,
+		"total":      len(entries),
 	}), nil
 }
 

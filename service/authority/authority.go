@@ -444,6 +444,18 @@ func (s *Service) ExecuteAction(
 //
 // Reconciliation is an operator execution-control operation, not a public API.
 func (s *Service) ReconcileIntent(ctx context.Context, scenarioID, intentID string, outcome IntentOutcome, operatorID string) error {
+	// Log reconciliation before dispatching to kernel.
+	s.audit.Log(ctx, &audit.ActivityEntry{
+		ScenarioID: scenarioID,
+		Type:       audit.ActivityReconciliationCompleted,
+		ActorID:    operatorID,
+		SubjectID:  intentID,
+		Details: map[string]interface{}{
+			"intent_id": intentID,
+			"outcome":   outcome.String(),
+		},
+	})
+
 	switch outcome {
 	case IntentOutcomeCompleted:
 		return s.kern.CompleteIntent(ctx, scenarioID, intentID)
@@ -453,6 +465,20 @@ func (s *Service) ReconcileIntent(ctx context.Context, scenarioID, intentID stri
 		return s.kern.CancelIntent(ctx, scenarioID, intentID)
 	default:
 		return fmt.Errorf("unknown outcome: %d", outcome)
+	}
+}
+
+// String returns the human-readable name for an IntentOutcome.
+func (o IntentOutcome) String() string {
+	switch o {
+	case IntentOutcomeCompleted:
+		return "completed"
+	case IntentOutcomeFailed:
+		return "failed"
+	case IntentOutcomeCancelled:
+		return "cancelled"
+	default:
+		return "unknown"
 	}
 }
 

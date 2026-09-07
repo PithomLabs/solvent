@@ -54,6 +54,7 @@ func TestMain(m *testing.M) {
 	aud := audit.New(sharedDB)
 	reg := executor.NewRegistry()
 	authSvc = authority.New(sharedDB, pol, aud, reg)
+	auditSvc = aud
 	ledgerSvc = ledger.New(sharedDB, aud)
 
 	code := m.Run()
@@ -539,4 +540,184 @@ func TestAuthorizeAction_ValidArgs(t *testing.T) {
 	if inner["belief_id"] != beliefID {
 		t.Errorf("belief_id = %v, want %s", inner["belief_id"], beliefID)
 	}
+}
+
+// --- Execution Tool Tests ---
+
+// TestMCPHandler_Execute_RequiresAuthSvc: verify error when authSvc is nil.
+func TestMCPHandler_Execute_RequiresAuthSvc(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+
+	// Ensure authSvc is nil.
+	authSvc = nil
+
+	args := map[string]interface{}{
+		"scenario":  "track1",
+		"belief_id": "00000000-0000-0000-0000-000000000099",
+		"action":    "deploy",
+		"target_id": "00000000-0000-0000-0000-000000000098",
+		"intent_id": "00000000-0000-0000-0000-000000000097",
+	}
+
+	result, err := handleSolventExecute(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected MCP error when authSvc is nil")
+	}
+}
+
+// TestMCPHandler_Execute_InvalidScenario: verify error for unknown scenario.
+func TestMCPHandler_Execute_InvalidScenario(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+
+	// Ensure authSvc is set.
+	if authSvc == nil {
+		t.Skip("authority service not initialized")
+	}
+
+	args := map[string]interface{}{
+		"scenario":  "nonexistent",
+		"belief_id": "00000000-0000-0000-0000-000000000099",
+		"action":    "deploy",
+		"target_id": "00000000-0000-0000-0000-000000000098",
+		"intent_id": "00000000-0000-0000-0000-000000000097",
+	}
+
+	result, err := handleSolventExecute(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected MCP error for unknown scenario")
+	}
+}
+
+// TestMCPHandler_Execute_MissingRequiredFields: verify error for missing fields.
+func TestMCPHandler_Execute_MissingRequiredFields(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+
+	if authSvc == nil {
+		t.Skip("authority service not initialized")
+	}
+
+	// Missing belief_id.
+	args := map[string]interface{}{
+		"scenario":  "track1",
+		"action":    "deploy",
+		"target_id": "00000000-0000-0000-0000-000000000098",
+		"intent_id": "00000000-0000-0000-0000-000000000097",
+	}
+	result, err := handleSolventExecute(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected MCP error for missing belief_id")
+	}
+}
+
+// TestMCPHandler_Execute_InvalidBelief: verify error for non-existent belief in scenario.
+func TestMCPHandler_Execute_InvalidBelief(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+
+	if authSvc == nil {
+		t.Skip("authority service not initialized")
+	}
+
+	args := map[string]interface{}{
+		"scenario":  "track1",
+		"belief_id": "00000000-0000-0000-0000-000000000099",
+		"action":    "deploy",
+		"target_id": "00000000-0000-0000-0000-000000000098",
+		"intent_id": "00000000-0000-0000-0000-000000000097",
+	}
+	result, err := handleSolventExecute(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected MCP error for non-existent belief")
+	}
+}
+
+// TestMCPHandler_Activity_RequiresAuditSvc: verify error when auditSvc is nil.
+func TestMCPHandler_Activity_RequiresAuditSvc(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+
+	// Save and restore.
+	origAudit := auditSvc
+	defer func() { auditSvc = origAudit }()
+	auditSvc = nil
+
+	args := map[string]interface{}{
+		"scenario": "track1",
+	}
+	result, err := handleSolventActivity(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected MCP error when auditSvc is nil")
+	}
+}
+
+// TestMCPHandler_Activity_InvalidScenario: verify error for unknown scenario.
+func TestMCPHandler_Activity_InvalidScenario(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+
+	if auditSvc == nil {
+		t.Skip("audit service not initialized")
+	}
+
+	args := map[string]interface{}{
+		"scenario": "nonexistent",
+	}
+	result, err := handleSolventActivity(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected MCP error for unknown scenario")
+	}
+}
+
+// TestMCPHandler_Activity_Success: verify activity entries are returned.
+func TestMCPHandler_Activity_Success(t *testing.T) {
+	db := sharedDB
+	ctx := context.Background()
+
+	if auditSvc == nil {
+		t.Skip("audit service not initialized")
+	}
+
+	args := map[string]interface{}{
+		"scenario": "track1",
+		"limit":    float64(10),
+	}
+	result, err := handleSolventActivity(ctx, db, args)
+	if err != nil {
+		t.Fatalf("handler returned Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("handler returned MCP error: %s", result.Content[0].(*mcp.TextContent).Text)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	activities, ok := resp["activities"].([]interface{})
+	if !ok {
+		t.Fatalf("expected activities array, got: %v", resp)
+	}
+	t.Logf("activity count: %d", len(activities))
 }

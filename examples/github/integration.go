@@ -107,6 +107,50 @@ func main() {
 	}
 	fmt.Println("6. Attached justification")
 
+	// 7. Request authorization
+	_, err = c.post(fmt.Sprintf("/v1/targets/%s/request-authorization?principal_id=%s", targetID, principalID), nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "request authorization: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("7. Requested authorization")
+
+	// 8. Approve
+	_, err = c.post(fmt.Sprintf("/v1/targets/%s/approve?principal_id=%s", targetID, principalID), nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "approve: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("8. Approved")
+
+	// 9. Create intent and execute
+	intent, err := c.post("/v1/intents", map[string]interface{}{
+		"scenario_id": scenarioID,
+		"belief_id":   beliefID,
+		"action":      "deploy",
+		"target_id":   targetID,
+		"principal_id": principalID,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create intent: %v\n", err)
+		os.Exit(1)
+	}
+	intentID := intent["intent_id"].(string)
+	fmt.Printf("9. Created intent: %s\n", intentID)
+
+	execResult, err := c.post("/v1/authorizations/execute", map[string]interface{}{
+		"scenario_id": scenarioID,
+		"belief_id":   beliefID,
+		"action":      "deploy",
+		"target_id":   targetID,
+		"intent_id":   intentID,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "execute: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("10. Executed: allowed=%v success=%v\n", execResult["allowed"], execResult["success"])
+
 	fmt.Println("\nGitHub integration example complete.")
 	fmt.Println("The adapter calls the REST API; all authorization logic lives in the kernel.")
 }

@@ -828,3 +828,297 @@ func TestP01_ValidAuthExecutes(t *testing.T) {
 		t.Errorf("expected output 'etcd deployed successfully', got %q", result.Output)
 	}
 }
+
+// --- Adversarial Tests: Execution Security Contract ---
+
+// TestExec11_ParameterSubstitutionAttack: caller supplies different repo/workflow/ref.
+// Expected: kernel rejects mismatched parameters — the kernel itself prevents
+// parameter substitution by validating consequence_parameters against the snapshot.
+func TestExec11_ParameterSubstitutionAttack(t *testing.T) {
+	ctx := context.Background()
+	st := kernel.New(shared)
+	rec := executor.NewRecordingFunc("test_action", "output")
+	svc := newTestService(t, rec)
+
+	sid := testScenario(30)
+	principalID := createPrincipal(t, ctx, st, "agent", "exec11-issuer")
+	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec11")
+	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+
+	// Pass DIFFERENT consequence_parameters than what was approved.
+	attackerParams, _ := json.Marshal(map[string]string{
+		"repo":     "evil/owner-repo",
+		"workflow": "malicious.yml",
+		"ref":      "main",
+	})
+
+	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
+		intentID, map[string]interface{}{}, "execution", attackerParams)
+	if err != nil {
+		t.Fatalf("ExecuteAction error: %v", err)
+	}
+
+	// The kernel validates consequence_parameters against the snapshot.
+	// Mismatched params → DENIED. This is the correct security behavior:
+	// the kernel prevents parameter substitution at the authorization boundary.
+	if result.Allowed {
+		t.Fatalf("expected DENIED for mismatched params, got ALLOWED")
+	}
+	if rec.Called() {
+		t.Errorf("executor must NOT be called when params mismatch")
+	}
+	t.Logf("correctly denied: reason=%s", result.Reason)
+}
+
+// TestExec12_ExecutorSelectorAttack: attempt to override executor via action name.
+// Expected: action is authorized (kernel approves), but executor is not found.
+// The hardcoded action→executor mapping is the only execution path.
+func TestExec12_ExecutorSelectorAttack(t *testing.T) {
+	ctx := context.Background()
+	st := kernel.New(shared)
+	rec := executor.NewRecordingFunc("test_action", "output")
+	svc := newTestService(t, rec)
+
+	sid := testScenario(31)
+	principalID := createPrincipal(t, ctx, st, "agent", "exec12-issuer")
+	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec12")
+
+	// Create a target with action="malicious_action" (not in actionExecutorMap).
+	params, _ := json.Marshal(map[string]string{"repo": "owner/repo", "workflow": "deploy.yml", "ref": "main"})
+	targetID, err := st.CreateTarget(ctx, principalID,
+		"scenario", sid, "belief:"+beliefID,
+		"solvent", "malicious_action", "execution", params, principalID)
+	if err != nil {
+		t.Fatalf("setup (create target): %v", err)
+	}
+	_ = st.AttachJustification(ctx, targetID, beliefID, "promoted", principalID)
+	_ = st.RequestAuthorization(ctx, targetID, principalID)
+	_ = st.Approve(ctx, targetID, principalID)
+
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "malicious_action")
+
+	result, err := svc.ExecuteAction(ctx, sid, beliefID, "malicious_action", targetID, principalID,
+		intentID, map[string]interface{}{}, "execution", params)
+	if err != nil {
+		t.Fatalf("ExecuteAction error: %v", err)
+	}
+
+	// The kernel authorizes the action (target is approved), but the executor
+	// registry has no entry for "malicious_action". Result: Allowed=true, Success=false.
+	if !result.Allowed {
+		t.Errorf("expected ALLOWED (kernel approves), got DENIED: %s", result.Reason)
+	}
+	if result.Success {
+		t.Errorf("expected Success=false (no executor), got true")
+	}
+	if rec.Called() {
+		t.Errorf("executor must NOT be called for unregistered action")
+	}
+}
+
+// TestExec13_AuthorityRevokedMidFlight: revoke authority between authorize and execute.
+// Expected: PrepareForAction re-reads current state, kernel.Authorize denies.
+func TestExec13_AuthorityRevokedMidFlight(t *testing.T) {
+	ctx := context.Background()
+	st := kernel.New(shared)
+	rec := executor.NewRecordingFunc("test_action", "output")
+	svc := newTestService(t, rec)
+
+	sid := testScenario(32)
+	principalID := createPrincipal(t, ctx, st, "agent", "exec13-issuer")
+	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec13")
+	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+
+	// Revoke authority.
+	if err := st.RevokeTarget(ctx, targetID, principalID, "mid-flight revocation"); err != nil {
+		t.Fatalf("setup (revoke): %v", err)
+	}
+
+	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
+	if err != nil {
+		t.Fatalf("ExecuteAction error: %v", err)
+	}
+
+	if result.Allowed {
+		t.Errorf("expected DENIED after revocation, got ALLOWED")
+	}
+	if rec.Called() {
+		t.Errorf("executor must NOT be called when authority revoked")
+	}
+}
+
+// TestExec14_CrossPrincipalExecution: principal A's intent executed by principal B.
+// Expected: DENIED — authenticated principal does not match intent's authority context.
+func TestExec14_CrossPrincipalExecution(t *testing.T) {
+	ctx := context.Background()
+	st := kernel.New(shared)
+	rec := executor.NewRecordingFunc("test_action", "output")
+	svc := newTestService(t, rec)
+
+	sid := testScenario(33)
+	principalA := createPrincipal(t, ctx, st, "agent", "exec14-issuer-a")
+	principalB := createPrincipal(t, ctx, st, "agent", "exec14-issuer-b")
+	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec14")
+	targetID := createApprovedTarget(t, ctx, st, sid, principalA, beliefID, "deploy")
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+
+	// Principal B tries to execute principal A's intent.
+	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalB,
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
+	if err != nil {
+		t.Fatalf("ExecuteAction error: %v", err)
+	}
+
+	if result.Allowed {
+		t.Errorf("expected DENIED for cross-principal execution, got ALLOWED")
+	}
+	if rec.Called() {
+		t.Errorf("executor must NOT be called for cross-principal execution")
+	}
+}
+
+// TestExec15_WrongScenario: valid intent + different scenario_id → DENIED.
+func TestExec15_WrongScenario(t *testing.T) {
+	ctx := context.Background()
+	st := kernel.New(shared)
+	rec := executor.NewRecordingFunc("test_action", "output")
+	svc := newTestService(t, rec)
+
+	sid := testScenario(34)
+	wrongSid := testScenario(35)
+	principalID := createPrincipal(t, ctx, st, "agent", "exec15-issuer")
+	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec15")
+	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+
+	// Use wrong scenario_id.
+	result, err := svc.ExecuteAction(ctx, wrongSid, beliefID, "deploy", targetID, principalID,
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
+	if err != nil {
+		t.Fatalf("ExecuteAction error: %v", err)
+	}
+
+	if result.Allowed {
+		t.Errorf("expected DENIED for wrong scenario, got ALLOWED")
+	}
+	if rec.Called() {
+		t.Errorf("executor must NOT be called for wrong scenario")
+	}
+}
+
+// TestExec16_WrongBelief: valid intent + different belief_id → DENIED.
+func TestExec16_WrongBelief(t *testing.T) {
+	ctx := context.Background()
+	st := kernel.New(shared)
+	rec := executor.NewRecordingFunc("test_action", "output")
+	svc := newTestService(t, rec)
+
+	sid := testScenario(36)
+	principalID := createPrincipal(t, ctx, st, "agent", "exec16-issuer")
+	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec16")
+	wrongBeliefID := createAndPromoteBelief(t, ctx, st, sid, "wrong belief for Exec16")
+	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+
+	// Use wrong belief_id.
+	result, err := svc.ExecuteAction(ctx, sid, wrongBeliefID, "deploy", targetID, principalID,
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
+	if err != nil {
+		t.Fatalf("ExecuteAction error: %v", err)
+	}
+
+	if result.Allowed {
+		t.Errorf("expected DENIED for wrong belief, got ALLOWED")
+	}
+	if rec.Called() {
+		t.Errorf("executor must NOT be called for wrong belief")
+	}
+}
+
+// TestExec17_WrongAction: valid intent + different action → DENIED.
+func TestExec17_WrongAction(t *testing.T) {
+	ctx := context.Background()
+	st := kernel.New(shared)
+	rec := executor.NewRecordingFunc("test_action", "output")
+	svc := newTestService(t, rec)
+
+	sid := testScenario(37)
+	principalID := createPrincipal(t, ctx, st, "agent", "exec17-issuer")
+	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec17")
+	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+
+	// Use wrong action.
+	result, err := svc.ExecuteAction(ctx, sid, beliefID, "rollback", targetID, principalID,
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
+	if err != nil {
+		t.Fatalf("ExecuteAction error: %v", err)
+	}
+
+	if result.Allowed {
+		t.Errorf("expected DENIED for wrong action, got ALLOWED")
+	}
+	if rec.Called() {
+		t.Errorf("executor must NOT be called for wrong action")
+	}
+}
+
+// TestExec18_WrongTarget: valid intent + different target_id → DENIED.
+func TestExec18_WrongTarget(t *testing.T) {
+	ctx := context.Background()
+	st := kernel.New(shared)
+	rec := executor.NewRecordingFunc("test_action", "output")
+	svc := newTestService(t, rec)
+
+	sid := testScenario(38)
+	principalID := createPrincipal(t, ctx, st, "agent", "exec18-issuer")
+	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec18")
+	createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+
+	// Use wrong target_id.
+	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "wrong-target-id", principalID,
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
+	if err != nil {
+		t.Fatalf("ExecuteAction error: %v", err)
+	}
+
+	if result.Allowed {
+		t.Errorf("expected DENIED for wrong target, got ALLOWED")
+	}
+	if rec.Called() {
+		t.Errorf("executor must NOT be called for wrong target")
+	}
+}
+
+// TestExec19_WrongPrincipal: valid intent + different principal → DENIED.
+func TestExec19_WrongPrincipal(t *testing.T) {
+	ctx := context.Background()
+	st := kernel.New(shared)
+	rec := executor.NewRecordingFunc("test_action", "output")
+	svc := newTestService(t, rec)
+
+	sid := testScenario(39)
+	principalA := createPrincipal(t, ctx, st, "agent", "exec19-issuer-a")
+	wrongPrincipal := createPrincipal(t, ctx, st, "agent", "exec19-issuer-wrong")
+	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec19")
+	targetID := createApprovedTarget(t, ctx, st, sid, principalA, beliefID, "deploy")
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+
+	// Use wrong principal.
+	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, wrongPrincipal,
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
+	if err != nil {
+		t.Fatalf("ExecuteAction error: %v", err)
+	}
+
+	if result.Allowed {
+		t.Errorf("expected DENIED for wrong principal, got ALLOWED")
+	}
+	if rec.Called() {
+		t.Errorf("executor must NOT be called for wrong principal")
+	}
+}

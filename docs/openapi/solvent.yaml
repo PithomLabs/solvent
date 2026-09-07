@@ -653,6 +653,50 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /v1/authorizations/execute:
+    post:
+      operationId: executeAction
+      summary: Execute an authorized action (claim intent, invoke provider, record outcome)
+      description: |
+        The execution boundary. Claims a live intent, invokes the configured
+        executor with the approved snapshot parameters, and records the outcome.
+
+        Security invariants:
+        - Authenticated principal is server-derived, never caller-supplied.
+        - Snapshot consequence_parameters are read from the database, not from the caller.
+        - The executor is resolved from the internal registry, not caller-supplied.
+        - intent_id is the authoritative execution identity.
+      tags: [Authorizations]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecuteActionRequest"
+      responses:
+        "200":
+          description: Execution attempted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecuteActionResult"
+        "403":
+          description: |
+            Forbidden. Possible codes:
+            - `actor_id_mismatch`: actor_id does not match authenticated principal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Execution service not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APIError"
+
   # ──────────────────────────────────────────────
   # Discharge
   # ──────────────────────────────────────────────
@@ -1288,6 +1332,71 @@ components:
           type: string
         authority:
           $ref: "#/components/schemas/AuthResult"
+
+    ExecuteActionRequest:
+      type: object
+      required: [scenario_id, belief_id, action, target_id, intent_id]
+      description: |
+        Execute an authorized action. The authenticated principal is derived
+        from the API key, not from the request body. consequence_parameters
+        are read from the approved snapshot, not from the caller.
+      properties:
+        scenario_id:
+          type: string
+          format: uuid
+          description: Scenario containing the belief
+        belief_id:
+          type: string
+          format: uuid
+          description: Promoted belief authorizing the action
+        action:
+          type: string
+          description: Action to execute (must match the authorized action)
+        target_id:
+          type: string
+          format: uuid
+          description: Authority target with approved snapshot
+        intent_id:
+          type: string
+          format: uuid
+          description: Live intent to claim and execute
+        consequence_type:
+          type: string
+          description: Consequence type (defaults to "execution")
+
+    ExecuteActionResult:
+      type: object
+      properties:
+        belief_id:
+          type: string
+          format: uuid
+        intent_id:
+          type: string
+          format: uuid
+        intent_state:
+          type: string
+          description: 'executing if provider accepted but not completed, executed if completed'
+
+        action:
+          type: string
+        allowed:
+          type: boolean
+          description: Whether kernel.Authorize granted authority
+        success:
+          type: boolean
+          description: Whether the executor completed successfully
+        output:
+          type: string
+          description: Provider output (e.g., GitHub run ID)
+        error:
+          type: string
+          description: Error message if execution failed
+        reason:
+          type: string
+          description: Denial reason if authority was not granted
+        executed_at:
+          type: string
+          format: date-time
 
     # ────────────────────────────────────────────
     # Discharge

@@ -11,9 +11,11 @@ cd "$(dirname "$0")/.."
 
 PKG="${I7_PKG:-kernel}"
 OUT="${I7_OUT:-docs/M1_I7.md}"
-EXPECT_TX=16  # kernel.go: Enter, AddEvidence, RetireDebt, Promote, IntentOnPromoted, RetractCascade, EnsureBelief (7)
-               # authority.go: CreatePrincipal, RevokePrincipal, CreateTarget, AttachJustification,
-               #   RequestAuthorization, Approve, Authorize, RevokeTarget, Discharge (9)
+EXPECT_TX=21  # kernel.go: EnterBelief, AddEvidence, RetireDebt, Promote, IntentOnPromoted,
+              #   RetractCascade, EnsureBelief (7)
+              # authority.go: CreatePrincipal, RevokePrincipal, CreateTarget, AttachJustification,
+              #   RequestAuthorization, Approve, Authorize, RevokeTarget, Discharge,
+              #   ClaimIntent, CompleteIntent, RollbackClaim, ReconcileIntent, FailIntent (14)
 
 fail() {
   echo "I-7 FAIL"

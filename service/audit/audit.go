@@ -55,6 +55,9 @@ const (
 	ActivityExecutorFailed      ActivityType = "executor_failed"
 	ActivityExecutorDenied      ActivityType = "executor_denied"
 	ActivityIntentCompletionFailed ActivityType = "intent_completion_failed"
+
+	// Reconciliation lifecycle.
+	ActivityReconciliationCompleted ActivityType = "reconciliation_completed"
 )
 
 // ActivityEntry is one row in the activity ledger.
