@@ -96,6 +96,11 @@ func (s *Server) handleListBeliefs(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleRetireDebt handles POST /v1/beliefs/{id}/debt/retire.
+//
+// Access control: the authenticated principal must exist and not be revoked.
+// This is a best-effort liveness pre-check — the kernel owns its internal
+// crdb.ExecuteTx, so this check cannot be made atomic with the debt mutation.
+// The residual TOCTOU race is documented and accepted.
 func (s *Server) handleRetireDebt(w http.ResponseWriter, r *http.Request) {
 	beliefID := r.PathValue("id")
 	scenarioID := r.URL.Query().Get("scenario_id")
@@ -115,6 +120,18 @@ func (s *Server) handleRetireDebt(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateNonEmpty(req.DebtItem, "debt_item"); err != nil {
 		writeValidationError(w, "debt_item", err.Error(), "")
+		return
+	}
+
+	// Access control: verify authenticated principal is active.
+	principal := AuthFromContext(r.Context())
+	if principal == nil {
+		writeError(w, http.StatusUnauthorized, "missing_principal",
+			"No authenticated principal", nil)
+		return
+	}
+	if err := verifyPrincipalActive(r.Context(), s.db, principal.PrincipalID); err != nil {
+		writeKernelError(w, err, "")
 		return
 	}
 

@@ -226,7 +226,7 @@ func TestIntegration_DuplicateDischargePrevention(t *testing.T) {
 
 	scenarioID := createTestScenario(t)
 	beliefID := createTestBelief(t, db, scenarioID)
-	dischargePrincipalID := createTestPrincipal(t, db)
+	_ = createTestPrincipal(t, db) // create a second principal for other tests
 
 	// First discharge.
 	body := map[string]interface{}{
@@ -234,7 +234,7 @@ func TestIntegration_DuplicateDischargePrevention(t *testing.T) {
 		"belief_id":      beliefID,
 		"obligation_key": "test-obligation",
 		"instrument_ref": "ref-001",
-		"discharged_by":  dischargePrincipalID,
+		"discharged_by":  testPrincipalID,
 	}
 	resp := doRequest(t, ts, "POST", "/v1/discharge", body)
 	if resp.StatusCode != http.StatusOK {
@@ -243,7 +243,7 @@ func TestIntegration_DuplicateDischargePrevention(t *testing.T) {
 	resp.Body.Close()
 
 	// Duplicate discharge should fail.
-	body["discharged_by"] = dischargePrincipalID
+	body["discharged_by"] = testPrincipalID
 	resp = doRequest(t, ts, "POST", "/v1/discharge", body)
 	if resp.StatusCode != http.StatusConflict {
 		t.Errorf("duplicate discharge: expected 409, got %d", resp.StatusCode)
@@ -341,7 +341,7 @@ func TestCS_Discharge_WrongScenario(t *testing.T) {
 	scenarioA := createTestScenario(t)
 	scenarioB := createTestScenario(t)
 	beliefID := createTestBelief(t, db, scenarioA)
-	principalID := createTestPrincipal(t, db)
+	_ = createTestPrincipal(t, db) // create a second principal for other tests
 
 	// Read state before.
 	var countBefore int
@@ -357,7 +357,7 @@ func TestCS_Discharge_WrongScenario(t *testing.T) {
 		"belief_id":     beliefID,
 		"obligation_key": "cs-obligation",
 		"instrument_ref": "cs-instrument",
-		"discharged_by":  principalID,
+		"discharged_by":  testPrincipalID,
 	}
 	resp := doRequest(t, ts, "POST", "/v1/discharge", body)
 	if resp.StatusCode != http.StatusNotFound {
@@ -379,4 +379,229 @@ func TestCS_Discharge_WrongScenario(t *testing.T) {
 		t.Errorf("debt mutated: before=%q, after=%q", debtBefore, debtAfter)
 	}
 	_ = scenarioA // unused but ensures both scenarios are created
+}
+
+// --- Service-layer access control tests (Post-Kernel-Freeze Cleanup) ---
+
+func TestAC_RetireDebt_RevokedPrincipalRejected(t *testing.T) {
+	db := testDB(t)
+	if db == nil {
+		return
+	}
+	defer db.Close()
+
+	ts := newTestServer(t, db)
+	defer ts.Close()
+
+	scenarioID := createTestScenario(t)
+	beliefID := createTestBelief(t, db, scenarioID)
+
+	// Read debt before.
+	var debtBefore string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtBefore)
+
+	// Revoke the authenticated principal.
+	_, err := db.ExecContext(context.Background(),
+		`UPDATE principal SET revoked_at = now() WHERE principal_id = $1::UUID`, testPrincipalID)
+	if err != nil {
+		t.Fatalf("revoke principal: %v", err)
+	}
+
+	// Attempt RetireDebt → 403 revoked_principal.
+	body := map[string]interface{}{
+		"debt_item": "needBlastRadius",
+	}
+	resp := doRequest(t, ts, "POST",
+		"/v1/beliefs/"+beliefID+"/debt/retire?scenario_id="+scenarioID, body)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("revoked principal retire: expected 403, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Verify zero debt mutation.
+	var debtAfter string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtAfter)
+	if debtBefore != debtAfter {
+		t.Errorf("debt mutated after denial: before=%q, after=%q", debtBefore, debtAfter)
+	}
+
+	// Restore principal for other tests.
+	_, _ = db.ExecContext(context.Background(),
+		`UPDATE principal SET revoked_at = NULL WHERE principal_id = $1::UUID`, testPrincipalID)
+}
+
+func TestAC_RetireDebt_ActivePrincipalAllowed(t *testing.T) {
+	db := testDB(t)
+	if db == nil {
+		return
+	}
+	defer db.Close()
+
+	ts := newTestServer(t, db)
+	defer ts.Close()
+
+	scenarioID := createTestScenario(t)
+	beliefID := createTestBelief(t, db, scenarioID)
+
+	// Read debt before.
+	var debtBefore string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtBefore)
+	if debtBefore == "" {
+		t.Fatal("belief has no debt to retire")
+	}
+
+	// Retire one debt item → 200.
+	body := map[string]interface{}{
+		"debt_item": "needBlastRadius",
+	}
+	resp := doRequest(t, ts, "POST",
+		"/v1/beliefs/"+beliefID+"/debt/retire?scenario_id="+scenarioID, body)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("active principal retire: expected 200, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Verify debt was mutated.
+	var debtAfter string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtAfter)
+	if debtBefore == debtAfter {
+		t.Errorf("debt not mutated: before=%q, after=%q", debtBefore, debtAfter)
+	}
+}
+
+func TestAC_Discharge_ImpersonationRejected(t *testing.T) {
+	db := testDB(t)
+	if db == nil {
+		return
+	}
+	defer db.Close()
+
+	ts := newTestServer(t, db)
+	defer ts.Close()
+
+	scenarioID := createTestScenario(t)
+	beliefID := createTestBelief(t, db, scenarioID)
+
+	// Read state before.
+	var countBefore int
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM debt_discharge WHERE belief_id=$1::UUID`, beliefID).Scan(&countBefore)
+	var debtBefore string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtBefore)
+
+	// Create a different principal to impersonate.
+	impersonatedID := createTestPrincipal(t, db)
+
+	// Attempt discharge with mismatched discharged_by → 403.
+	body := map[string]interface{}{
+		"scenario_id":    scenarioID,
+		"belief_id":      beliefID,
+		"obligation_key": "ac-obligation",
+		"instrument_ref": "ac-instrument",
+		"discharged_by":  impersonatedID,
+	}
+	resp := doRequest(t, ts, "POST", "/v1/discharge", body)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("impersonation discharge: expected 403, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Verify zero discharge rows created.
+	var countAfter int
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM debt_discharge WHERE belief_id=$1::UUID`, beliefID).Scan(&countAfter)
+	if countBefore != countAfter {
+		t.Errorf("discharge rows mutated: before=%d, after=%d", countBefore, countAfter)
+	}
+
+	// Verify zero debt mutation.
+	var debtAfter string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtAfter)
+	if debtBefore != debtAfter {
+		t.Errorf("debt mutated after denial: before=%q, after=%q", debtBefore, debtAfter)
+	}
+}
+
+func TestAC_Discharge_OwnIdentityAllowed(t *testing.T) {
+	db := testDB(t)
+	if db == nil {
+		return
+	}
+	defer db.Close()
+
+	ts := newTestServer(t, db)
+	defer ts.Close()
+
+	scenarioID := createTestScenario(t)
+	beliefID := createTestBelief(t, db, scenarioID)
+
+	// Read debt before.
+	var debtBefore string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtBefore)
+
+	// Discharge using own identity.
+	body := map[string]interface{}{
+		"scenario_id":    scenarioID,
+		"belief_id":      beliefID,
+		"obligation_key": "needBlastRadius",
+		"instrument_ref": "ac-own-instrument",
+		"discharged_by":  testPrincipalID,
+	}
+	resp := doRequest(t, ts, "POST", "/v1/discharge", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("own identity discharge: expected 200, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Query ALL discharge rows for this belief (no obligation_key filter).
+	var rowCount int
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM debt_discharge WHERE belief_id=$1::UUID`,
+		beliefID).Scan(&rowCount)
+
+	// Prove a discharge row exists.
+	if rowCount == 0 {
+		t.Fatal("no discharge row found after HTTP 200 — persistence discrepancy")
+	}
+
+	// Query the actual row contents.
+	var storedObligation, storedInstrument, storedBy string
+	err := db.QueryRowContext(context.Background(),
+		`SELECT obligation_key, instrument_ref, discharged_by
+		 FROM debt_discharge WHERE belief_id=$1::UUID LIMIT 1`,
+		beliefID).Scan(&storedObligation, &storedInstrument, &storedBy)
+	if err != nil {
+		t.Fatalf("query discharge row: %v", err)
+	}
+
+	// Prove discharged_by matches the authenticated principal.
+	if storedBy != testPrincipalID {
+		t.Errorf("persisted discharged_by mismatch: want %q, got %q", testPrincipalID, storedBy)
+	}
+
+	// Prove obligation_key and instrument_ref match.
+	if storedObligation != "needBlastRadius" {
+		t.Errorf("persisted obligation_key mismatch: want %q, got %q", "needBlastRadius", storedObligation)
+	}
+	if storedInstrument != "ac-own-instrument" {
+		t.Errorf("persisted instrument_ref mismatch: want %q, got %q", "ac-own-instrument", storedInstrument)
+	}
+
+	// Prove debt was retired.
+	var debtAfter string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtAfter)
+	if debtBefore == debtAfter {
+		t.Errorf("debt not retired: before=%q, after=%q", debtBefore, debtAfter)
+	}
+	if debtAfter != "" && debtBefore != debtAfter {
+		t.Logf("debt retired: before=%q, after=%q", debtBefore, debtAfter)
+	}
 }
