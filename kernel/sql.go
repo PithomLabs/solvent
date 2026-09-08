@@ -28,8 +28,8 @@ const (
 		WHERE id = $1::UUID AND scenario_id = $2::UUID`
 
 	sqlIntentOnPromoted = `
-		INSERT INTO action_intent (scenario_id, belief_id, action)
-		VALUES ($1::UUID, $2::UUID, $3::STRING)`
+		INSERT INTO action_intent (scenario_id, belief_id, action, target_id, snapshot_id)
+		VALUES ($1::UUID, $2::UUID, $3::STRING, $4::UUID, $5::UUID)`
 
 	sqlAuditLiveOnNonPromoted = `
 		SELECT count(*) FROM action_intent a
@@ -172,7 +172,7 @@ const (
 	sqlAuthorizeResolve = `
 		SELECT ts.principal_id, ts.resource_type, ts.resource_id, ts.scope,
 		       ts.action_namespace, ts.action_name, ts.consequence_type, ts.consequence_parameters,
-		       ts.justification_set
+		       ts.justification_set, ts.snapshot_id
 		FROM target_activation ta
 		JOIN target_snapshot ts ON ts.target_id = ta.target_id AND ts.snapshot_id = ta.snapshot_id
 		WHERE ta.target_id = $1::UUID
@@ -196,7 +196,12 @@ const (
 		UPDATE action_intent SET state = 'executing'
 		WHERE id = $1::UUID AND scenario_id = $2::UUID
 		  AND belief_id = $3::UUID AND action = $4::STRING
-		  AND state = 'live'`
+		  AND state = 'live'
+		  AND (
+		    ($5::TEXT = '' AND target_id IS NULL AND snapshot_id IS NULL)
+		    OR
+		    (target_id::TEXT = $5::TEXT AND snapshot_id::TEXT = $6::TEXT)
+		  )`
 
 	sqlCompleteIntent = `
 		UPDATE action_intent SET state = 'executed'

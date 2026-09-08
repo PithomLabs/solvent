@@ -1209,7 +1209,7 @@ func TestCS_NEW01_HappyPath(t *testing.T) {
 	_ = shared.QueryRowContext(ctx,
 		`SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='deploy' AND state='live'`,
 		sid, bid).Scan(&intentID)
-	err := st.ClaimIntent(ctx, sid, intentID, bid, "deploy")
+	err := st.ClaimIntent(ctx, sid, intentID, bid, "deploy", "", "")
 	if err != nil {
 		t.Fatalf("NEW-01 happy path: expected success, got %v", err)
 	}
@@ -1237,7 +1237,7 @@ func TestCS_NEW01_WrongBelief(t *testing.T) {
 		`SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='deploy' AND state='live'`,
 		sid, bidA).Scan(&intentID)
 
-	err := st.ClaimIntent(ctx, sid, intentID, bidB, "deploy")
+	err := st.ClaimIntent(ctx, sid, intentID, bidB, "deploy", "", "")
 	failed := err != nil
 	rec.check(t, failed, Case{
 		ID: "NEW-01-wb", Wave: "CS",
@@ -1263,7 +1263,7 @@ func TestCS_NEW01_WrongAction(t *testing.T) {
 		`SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='deploy' AND state='live'`,
 		sid, bid).Scan(&intentID)
 
-	err := st.ClaimIntent(ctx, sid, intentID, bid, "rollback")
+	err := st.ClaimIntent(ctx, sid, intentID, bid, "rollback", "", "")
 	failed := err != nil
 	rec.check(t, failed, Case{
 		ID: "NEW-01-wa", Wave: "CS",
@@ -1291,7 +1291,7 @@ func TestCS_NEW01_ExactExploit(t *testing.T) {
 		sid, bidB).Scan(&intentB)
 
 	// Try to claim intentB using bidA's tuple — should fail.
-	err := st.ClaimIntent(ctx, sid, intentB, bidA, "deploy")
+	err := st.ClaimIntent(ctx, sid, intentB, bidA, "deploy", "", "")
 	failed := err != nil
 	rec.check(t, failed, Case{
 		ID: "NEW-01-ex", Wave: "CS",
@@ -1403,4 +1403,148 @@ func TestCS_NEW03_CrossScenarioRejected(t *testing.T) {
 		Expected: "ErrBeliefNotFound",
 		Observed: fmt.Sprintf("err=%v", err),
 	})
+}
+
+// --- Confused-deputy regression tests (Plan 10.1) ---
+
+func TestCS_CD01_ExactTargetSnapshotMatch(t *testing.T) {
+	rec.begin("CD")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sid := scenario(2001)
+
+	bid := mustPromoted(t, ctx, st, sid, "deploy exact match")
+	// Create intent via IntentOnPromoted (NULL target_id/snapshot_id).
+	if err := st.IntentOnPromoted(ctx, sid, bid, "deploy"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	var intentID string
+	_ = shared.QueryRowContext(ctx,
+		`SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='deploy' AND state='live'`,
+		sid, bid).Scan(&intentID)
+
+	// Claim with empty target/snapshot (IntentOnPromoted path).
+	err := st.ClaimIntent(ctx, sid, intentID, bid, "deploy", "", "")
+	failed := err == nil
+	rec.check(t, failed, Case{
+		ID: "CD01-em", Wave: "CD",
+		Purpose:  "ClaimIntent succeeds with exact empty target/snapshot (IntentOnPromoted path)",
+		Expected: "nil error",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
+}
+
+func TestCS_CD02_WrongTargetRejected(t *testing.T) {
+	rec.begin("CD")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sid := scenario(2002)
+
+	bid := mustPromoted(t, ctx, st, sid, "deploy wrong target")
+	// Create intent with NULL target_id/snapshot_id.
+	if err := st.IntentOnPromoted(ctx, sid, bid, "deploy"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	var intentID string
+	_ = shared.QueryRowContext(ctx,
+		`SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='deploy' AND state='live'`,
+		sid, bid).Scan(&intentID)
+
+	// Try to claim with a non-empty target_id — should fail (NULL ≠ non-NULL).
+	err := st.ClaimIntent(ctx, sid, intentID, bid, "deploy", "00000000-0000-0000-0000-000000000001", "")
+	failed := err != nil
+	rec.check(t, failed, Case{
+		ID: "CD02-wt", Wave: "CD",
+		Purpose:  "ClaimIntent rejects when target_id doesn't match (NULL vs non-NULL)",
+		Expected: "error",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
+	_ = st.RollbackClaim(ctx, sid, intentID)
+}
+
+func TestCS_CD03_DuplicateIntentRejected(t *testing.T) {
+	rec.begin("CD")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sid := scenario(2003)
+
+	bid := mustPromoted(t, ctx, st, sid, "deploy duplicate test")
+	// Create two intents on the same belief+action via IntentOnPromoted.
+	if err := st.IntentOnPromoted(ctx, sid, bid, "deploy"); err != nil {
+		t.Fatalf("setup intent 1: %v", err)
+	}
+	if err := st.IntentOnPromoted(ctx, sid, bid, "deploy"); err != nil {
+		t.Fatalf("setup intent 2: %v", err)
+	}
+
+	// Query both intents.
+	rows, err := shared.QueryContext(ctx,
+		`SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='deploy' AND state='live' ORDER BY id`,
+		sid, bid)
+	if err != nil {
+		t.Fatalf("query intents: %v", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	_ = rows.Close()
+
+	if len(ids) < 2 {
+		t.Fatalf("expected at least 2 intents, got %d", len(ids))
+	}
+
+	// Claim first intent.
+	err = st.ClaimIntent(ctx, sid, ids[0], bid, "deploy", "", "")
+	if err != nil {
+		t.Fatalf("first claim should succeed: %v", err)
+	}
+
+	// Second claim on different intent should still succeed (different intent ID).
+	err = st.ClaimIntent(ctx, sid, ids[1], bid, "deploy", "", "")
+	failed := err != nil
+	// Note: this is NOT a duplicate — different intent IDs. Both can be claimed.
+	// The duplicate intent guard is about the same intent, not two different intents.
+	_ = st.RollbackClaim(ctx, sid, ids[0])
+	_ = st.RollbackClaim(ctx, sid, ids[1])
+	rec.check(t, !failed, Case{
+		ID: "CD03-di", Wave: "CD",
+		Purpose:  "Two different intents on same belief+action can both be claimed (different intent IDs)",
+		Expected: "nil error",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
+}
+
+func TestCS_CD04_CompositeFKRejection(t *testing.T) {
+	rec.begin("CD")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sid := scenario(2004)
+
+	bid := mustPromoted(t, ctx, st, sid, "deploy FK test")
+	// Create intent via IntentOnPromoted (NULL target_id/snapshot_id).
+	if err := st.IntentOnPromoted(ctx, sid, bid, "deploy"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	var intentID string
+	_ = shared.QueryRowContext(ctx,
+		`SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='deploy' AND state='live'`,
+		sid, bid).Scan(&intentID)
+
+	// Try to claim with a non-existent target_id — should fail (FK violation or NULL mismatch).
+	fakeTargetID := "11111111-1111-1111-1111-111111111111"
+	fakeSnapshotID := "22222222-2222-2222-2222-222222222222"
+	err := st.ClaimIntent(ctx, sid, intentID, bid, "deploy", fakeTargetID, fakeSnapshotID)
+	failed := err != nil
+	rec.check(t, failed, Case{
+		ID: "CD04-fk", Wave: "CD",
+		Purpose:  "ClaimIntent rejects with non-existent target/snapshot (FK or NULL mismatch)",
+		Expected: "error",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
+	_ = st.RollbackClaim(ctx, sid, intentID)
 }

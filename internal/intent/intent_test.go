@@ -23,6 +23,7 @@ var schemaPaths = []string{
 	"../../db/006_authority_justification_cascade.sql",
 	"../../db/007_service_tables.sql",
 	"../../db/008_executing_state.sql",
+	"../../db/009_exact_authority_binding.sql",
 }
 
 var (

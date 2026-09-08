@@ -76,6 +76,10 @@ func writeKernelError(w http.ResponseWriter, err error, requestID string) {
 		status = http.StatusConflict
 		code = "action_on_unpromoted"
 		message = err.Error()
+	case errors.Is(err, kernel.ErrDuplicateIntent):
+		status = http.StatusConflict
+		code = "duplicate_intent"
+		message = err.Error()
 	default:
 		status = http.StatusInternalServerError
 		code = "internal_error"

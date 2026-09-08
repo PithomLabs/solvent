@@ -27,6 +27,7 @@ var embedSchemaPaths = []string{
 	"../../db/006_authority_justification_cascade.sql",
 	"../../db/007_service_tables.sql",
 	"../../db/008_executing_state.sql",
+	"../../db/009_exact_authority_binding.sql",
 }
 
 // Scenario namespace for this suite. 8888/9999/aaaa belong to internal/corpus;

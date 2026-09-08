@@ -26,6 +26,7 @@ var (
 	ErrBeliefNotPromoted    = errors.New("belief not promoted")
 	ErrRevokedPrincipal     = errors.New("revoked principal")
 	ErrDuplicateDischarge   = errors.New("duplicate discharge")
+	ErrDuplicateIntent      = errors.New("duplicate equivalent live intent")
 	ErrTargetNotActivated   = errors.New("target not activated")
 	ErrInvalidProposal      = errors.New("invalid proposal")
 

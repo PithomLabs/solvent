@@ -68,6 +68,25 @@ func newTestServerWithAuth(t *testing.T, db *sql.DB) *httptest.Server {
 	return httptest.NewServer(handler)
 }
 
+// newTestServerWithRecordingExecutor creates a new API server with authority service
+// and a recording executor. Returns the test server and the recording function so
+// tests can assert on executor invocation.
+func newTestServerWithRecordingExecutor(t *testing.T, db *sql.DB) (*httptest.Server, *executor.RecordingFunc) {
+	t.Helper()
+	auditSvc := audit.New(db)
+	policySvc := policy.New(db)
+	execReg := executor.NewRegistry()
+	rec := executor.NewRecordingFunc("test_action", "test output")
+	execReg.Register("github_trigger_workflow", rec.Func())
+	authSvc := authority.New(db, policySvc, auditSvc, execReg)
+	server := api.NewServer(db, auditSvc, api.WithAuthorityService(authSvc))
+	keyMap := map[string]string{
+		"test-api-key-12345": testPrincipalID,
+	}
+	handler := api.AuthMiddleware(keyMap, server.Handler())
+	return httptest.NewServer(handler), rec
+}
+
 // validAuth returns a valid Authorization header.
 func validAuth() string {
 	return "Bearer test-api-key-12345"

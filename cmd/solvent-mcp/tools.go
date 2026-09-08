@@ -243,6 +243,7 @@ func handleSolventAuthorizeAction(ctx context.Context, db *sql.DB, args map[stri
 	}
 
 	// Read the target's approved snapshot consequence_parameters.
+	// The kernel derives the authoritative snapshot_id independently via Authorize.
 	// Falls back to empty params when target is not activated — let authority deny.
 	var snapParams []byte
 	err = db.QueryRowContext(ctx, `
@@ -686,6 +687,7 @@ func handleSolventExecute(ctx context.Context, db *sql.DB, args map[string]inter
 	}
 
 	// Read the target's approved snapshot consequence_parameters.
+	// The kernel derives the authoritative snapshot_id independently via Authorize.
 	var snapParams []byte
 	err = db.QueryRowContext(ctx, `
 		SELECT ts.consequence_parameters
