@@ -172,7 +172,7 @@ func TestW1_B03_RetireDebt(t *testing.T) {
 
 	id, err := st.EnterBelief(ctx, sc, "claim retiring one debt", kernel.Derived)
 	if err == nil {
-		err = st.RetireDebt(ctx, id, "needBlastRadius")
+		err = st.RetireDebt(ctx, sc, id, "needBlastRadius")
 	}
 
 	var stored string
@@ -200,14 +200,14 @@ func TestW1_B04_RetireDebtIdempotent(t *testing.T) {
 
 	id, err := st.EnterBelief(ctx, sc, "claim retiring an absent debt", kernel.Derived)
 	if err == nil {
-		err = st.RetireDebt(ctx, id, "needBlastRadius")
+		err = st.RetireDebt(ctx, sc, id, "needBlastRadius")
 	}
 	before := debtString(t, ctx, id)
 
 	// Same item again: absent now, must be a no-op rather than an error.
 	var secondErr error
 	if err == nil {
-		secondErr = st.RetireDebt(ctx, id, "needBlastRadius")
+		secondErr = st.RetireDebt(ctx, sc, id, "needBlastRadius")
 	}
 	after := debtString(t, ctx, id)
 
@@ -229,10 +229,10 @@ func TestW1_B05_Promote(t *testing.T) {
 
 	id, err := st.EnterBelief(ctx, sc, "claim whose debt is fully retired", kernel.Derived)
 	if err == nil {
-		err = retireAll(ctx, st, id)
+		err = retireAll(ctx, st, sc, id)
 	}
 	if err == nil {
-		err = st.Promote(ctx, id)
+		err = st.Promote(ctx, sc, id)
 	}
 	status, _ := beliefState(t, ctx, id)
 
@@ -258,7 +258,7 @@ func TestW1_B09_I1_PromoteWithDebt(t *testing.T) {
 		t.Fatalf("B-09 setup: %v", setupErr)
 	}
 
-	err := st.Promote(ctx, id)
+	err := st.Promote(ctx, sc, id)
 	status, _ := beliefState(t, ctx, id)
 
 	isSentinel := errors.Is(err, kernel.ErrPromotionBlocked)
@@ -295,7 +295,7 @@ func TestW1_B10_I2_PromoteFinalTruth(t *testing.T) {
 		t.Fatalf("B-10 setup: %v", err)
 	}
 
-	err := st.Promote(ctx, id)
+	err := st.Promote(ctx, sc, id)
 	status, _ := beliefState(t, ctx, id)
 
 	isSentinel := errors.Is(err, kernel.ErrPromotionBlocked)
@@ -333,7 +333,7 @@ func TestW1_B18_RetryClassification(t *testing.T) {
 	seed := kernel.New(shared)
 	id, err := seed.EnterBelief(ctx, sc, "claim promoted under injected retries", kernel.Derived)
 	if err == nil {
-		err = retireAll(ctx, seed, id)
+		err = retireAll(ctx, seed, sc, id)
 	}
 	if err != nil {
 		t.Fatalf("B-18 setup: %v", err)
@@ -358,7 +358,7 @@ func TestW1_B18_RetryClassification(t *testing.T) {
 	// case pass vacuously — the test would "prove" retry handling while nothing retried.
 	injectionOn, controlState := injectionControl(ctx, injDB)
 
-	promoteErr := kernel.New(injDB).Promote(ctx, id)
+	promoteErr := kernel.New(injDB).Promote(ctx, sc, id)
 	status, _ := beliefState(t, ctx, id)
 
 	// N2: read the retry count from existing instrumentation only. No instrumentation
@@ -628,12 +628,171 @@ func TestW2_B19_CrossScenarioIsolation(t *testing.T) {
 	})
 }
 
+// --- Cross-scenario mutation regression tests (Plan 8.5) ---
+
+func TestCS1_RetireDebt_CrossScenario(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	scA, scB := scenario(501), scenario(502)
+
+	id, err := st.EnterBelief(ctx, scA, "belief for cross-scenario retire", kernel.Derived)
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	debtBefore := debtString(t, ctx, id)
+
+	err = st.RetireDebt(ctx, scB, id, "needBlastRadius")
+
+	var debtAfter string
+	if err == nil {
+		t.Fatal("expected error for cross-scenario RetireDebt")
+	}
+	debtAfter = debtString(t, ctx, id)
+
+	ok := errors.Is(err, kernel.ErrBeliefNotFound) && debtBefore == debtAfter
+	rec.check(t, ok, Case{
+		ID: "CS-1", Wave: "cs",
+		Purpose:   "M-01 — RetireDebt with wrong scenario returns ErrBeliefNotFound, zero mutation",
+		Expected:  "ErrBeliefNotFound + debt unchanged",
+		Observed:  fmt.Sprintf("err=%v, debt_before=%q, debt_after=%q", err, debtBefore, debtAfter),
+		Invariant: "cross-scenario isolation for RetireDebt",
+		Receipt:   receiptOf(err),
+	})
+}
+
+func TestCS2_RetireDebt_SameScenario_Idempotent(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(503)
+
+	id, err := st.EnterBelief(ctx, sc, "belief for idempotent retire", kernel.Derived)
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	err1 := st.RetireDebt(ctx, sc, id, "needBlastRadius")
+	err2 := st.RetireDebt(ctx, sc, id, "needBlastRadius")
+	debtAfter := debtString(t, ctx, id)
+
+	ok := err1 == nil && err2 == nil && debtAfter != "needBlastRadius"
+	rec.check(t, ok, Case{
+		ID: "CS-2", Wave: "cs",
+		Purpose:   "M-01 — same-scenario RetireDebt is idempotent",
+		Expected:  "both calls succeed + debt item removed",
+		Observed:  fmt.Sprintf("err1=%v, err2=%v, debt=%q", err1, err2, debtAfter),
+		Invariant: "RetireDebt idempotency within scenario",
+		Receipt:   receiptOf(err1),
+	})
+}
+
+func TestCS3_Promote_CrossScenario(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	scA, scB := scenario(504), scenario(505)
+
+	id, err := st.EnterBelief(ctx, scA, "belief for cross-scenario promote", kernel.Derived)
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := retireAll(ctx, st, scA, id); err != nil {
+		t.Fatalf("setup retire: %v", err)
+	}
+	statusBefore, _ := beliefState(t, ctx, id)
+
+	err = st.Promote(ctx, scB, id)
+
+	var statusAfter string
+	if err == nil {
+		t.Fatal("expected error for cross-scenario Promote")
+	}
+	statusAfter, _ = beliefState(t, ctx, id)
+
+	ok := errors.Is(err, kernel.ErrBeliefNotFound) && statusBefore == statusAfter
+	rec.check(t, ok, Case{
+		ID: "CS-3", Wave: "cs",
+		Purpose:   "M-01 — Promote with wrong scenario returns ErrBeliefNotFound, zero mutation",
+		Expected:  "ErrBeliefNotFound + status unchanged",
+		Observed:  fmt.Sprintf("err=%v, status_before=%q, status_after=%q", err, statusBefore, statusAfter),
+		Invariant: "cross-scenario isolation for Promote",
+		Receipt:   receiptOf(err),
+	})
+}
+
+func TestCS4_Discharge_CrossScenario(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	scA, scB := scenario(506), scenario(507)
+
+	id, err := st.EnterBelief(ctx, scA, "belief for cross-scenario discharge", kernel.Derived)
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	principal := createTestPrincipal(t, ctx, st, "agent", "cs-test")
+
+	var countBefore int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM debt_discharge WHERE belief_id=$1::UUID`, id).Scan(&countBefore)
+	debtBefore := debtString(t, ctx, id)
+
+	err = st.Discharge(ctx, scB, id, "cs-obligation", "cs-instrument", principal)
+
+	var countAfter int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM debt_discharge WHERE belief_id=$1::UUID`, id).Scan(&countAfter)
+	debtAfter := debtString(t, ctx, id)
+
+	ok := errors.Is(err, kernel.ErrBeliefNotFound) && countBefore == countAfter && debtBefore == debtAfter
+	rec.check(t, ok, Case{
+		ID: "CS-4", Wave: "cs",
+		Purpose:  "M-01 — Discharge with wrong scenario returns ErrBeliefNotFound, zero writes",
+		Expected: "ErrBeliefNotFound + zero discharge rows + debt unchanged",
+		Observed: fmt.Sprintf("err=%v, discharge_rows: before=%d after=%d, debt_before=%q debt_after=%q",
+			err, countBefore, countAfter, debtBefore, debtAfter),
+		Invariant: "cross-scenario isolation for Discharge",
+		Receipt:   receiptOf(err),
+	})
+}
+
+func TestCS5_Discharge_SameScenario_Atomic(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(508)
+
+	id, err := st.EnterBelief(ctx, sc, "belief for same-scenario discharge", kernel.Derived)
+	if err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	principal := createTestPrincipal(t, ctx, st, "agent", "cs-atomic-test")
+
+	err = st.Discharge(ctx, sc, id, "atomic-obligation", "atomic-instrument", principal)
+
+	var count int
+	_ = shared.QueryRowContext(ctx,
+		`SELECT count(*) FROM debt_discharge WHERE belief_id=$1::UUID`, id).Scan(&count)
+	debtAfter := debtString(t, ctx, id)
+
+	ok := err == nil && count == 1 && debtAfter != "atomic-obligation"
+	rec.check(t, ok, Case{
+		ID: "CS-5", Wave: "cs",
+		Purpose:   "M-01 — same-scenario Discharge is atomic: discharge row + debt retired",
+		Expected:  "success + 1 discharge row + debt item removed",
+		Observed:  fmt.Sprintf("err=%v, discharge_rows=%d, debt=%q", err, count, debtAfter),
+		Invariant: "Discharge atomicity within scenario",
+		Receipt:   receiptOf(err),
+	})
+}
+
 // B-24 and B-16 are ONE execution with two assertions. B-24 asserts how the cascade
 // fails; B-16 asserts that nothing survived the failure.
 //
-// A live intent in scenario B pointing at a belief in scenario A escapes the scoped
-// cancel. The retract then trips live_requires_promoted through ON UPDATE CASCADE, and
-// the whole transaction must roll back — including the cancels already issued.
+// NEW-02 remediation: cross-scenario intent creation is now rejected at the
+// createIntentWithinTx boundary. A foreign-scenario IntentOnPromoted returns
+// ErrBeliefNotFound, and RetractCascade succeeds without deadlock.
 func TestW2_B24_B16_BlockedCascadeIsAtomic(t *testing.T) {
 	rec.begin("2")
 	ctx := context.Background()
@@ -648,31 +807,23 @@ func TestW2_B24_B16_BlockedCascadeIsAtomic(t *testing.T) {
 	if err := st.IntentOnPromoted(ctx, scA, a2, "defer_patch"); err != nil {
 		t.Fatalf("B-24 setup: %v", err)
 	}
-	// Foreign-scenario intent on the SAME belief: the scoped cancel cannot see it.
-	if err := st.IntentOnPromoted(ctx, scB, a2, "foreign_scenario_action"); err != nil {
-		t.Fatalf("B-24 setup (foreign intent): %v", err)
-	}
+	// Foreign-scenario intent: NEW-02 fix rejects this at the transaction boundary.
+	err := st.IntentOnPromoted(ctx, scB, a2, "foreign_scenario_action")
 
-	n, err := st.RetractCascade(ctx, scA, a1)
-
-	// B-24: how it failed.
-	pgErr := pgErrOf(err)
-	failedCorrectly := err != nil && n == 0 && pgErr != nil &&
-		pgErr.Code == "23514" && pgErr.ConstraintName == "live_requires_promoted"
-
-	rec.check(t, failedCorrectly, Case{
+	// B-24: cross-scenario intent creation is rejected.
+	rejected := errors.Is(err, kernel.ErrBeliefNotFound)
+	rec.check(t, rejected, Case{
 		ID: "B-24", Wave: "2",
-		Purpose:   "M1-R4 — a foreign-scenario live intent blocks a scoped cascade: refusal, not corruption",
-		Expected:  "RetractCascade refused with 23514 / live_requires_promoted; returns 0",
-		Observed:  fmt.Sprintf("returned %d; sqlstate=%q; constraint=%q", n, sqlStateOf(err), constraintOf(err)),
-		SQLState:  sqlStateOf(err),
-		Constrain: constraintOf(err),
-		Invariant: "M1-R4 — the schema refuses rather than corrupts",
+		Purpose:   "NEW-02 — cross-scenario IntentOnPromoted rejected at createIntentWithinTx boundary",
+		Expected:  "ErrBeliefNotFound",
+		Observed:  fmt.Sprintf("err=%v", err),
+		Invariant: "NEW-02 — scenario ownership verified before intent INSERT",
 		Receipt:   receiptOf(err),
 	})
 
-	// B-16: nothing survived.
-	rec.begin("2")
+	// B-16: RetractCascade now succeeds (no foreign intent to block it).
+	n, retErr := st.RetractCascade(ctx, scA, a1)
+
 	a1Status, _ := beliefState(t, ctx, a1)
 	a2Status, _ := beliefState(t, ctx, a2)
 
@@ -682,18 +833,18 @@ func TestW2_B24_B16_BlockedCascadeIsAtomic(t *testing.T) {
 	_ = shared.QueryRowContext(ctx,
 		`SELECT count(*) FROM action_intent WHERE scenario_id=$1::UUID AND state='live'`, scB).Scan(&liveInB)
 
-	atomic := a1Status == "promoted" && a2Status == "promoted" && liveInA == 1 && liveInB == 1
-	observed := fmt.Sprintf("root=%q child=%q; live intents A=%d B=%d; rows changed=0", a1Status, a2Status, liveInA, liveInB)
-	if atomic {
-		observed += " — rollback verified"
+	retracted := retErr == nil && n == 2 && a1Status == "retracted" && a2Status == "retracted" && liveInA == 0 && liveInB == 0
+	observed := fmt.Sprintf("returned %d; err=%v; root=%q child=%q; live intents A=%d B=%d", n, retErr, a1Status, a2Status, liveInA, liveInB)
+	if retracted {
+		observed += " — retract succeeded, no 23514"
 	}
 
-	rec.check(t, atomic, Case{
+	rec.check(t, retracted, Case{
 		ID: "B-16", Wave: "2",
-		Purpose:   "I-8 — the cascade is ONE transaction: a blocked cascade leaves no partial effect, not even the cancels already issued",
-		Expected:  "both beliefs still 'promoted'; the in-scenario intent still 'live' (rollback verified); 0 rows changed",
+		Purpose:   "I-8 — RetractCascade succeeds after cross-scenario intent rejection (no 23514 deadlock)",
+		Expected:  "returns 2; both beliefs retracted; no live intents; no SQLSTATE 23514",
 		Observed:  observed,
-		Invariant: "I-8 — RetractCascade is a single transaction, cancel-before-retract",
+		Invariant: "I-8 — RetractCascade is safe when foreign intents are rejected at creation",
 		Receipt:   rowDump(t, ctx, scA, scB),
 	})
 }
@@ -898,9 +1049,9 @@ func TestW3_EnsureBelief_DifferentScenario(t *testing.T) {
 
 // ---------------------------------------------------------------- helpers
 
-func retireAll(ctx context.Context, st *kernel.Store, id string) error {
+func retireAll(ctx context.Context, st *kernel.Store, scenarioID, id string) error {
 	for _, item := range kernel.FullDebt {
-		if err := st.RetireDebt(ctx, id, item); err != nil {
+		if err := st.RetireDebt(ctx, scenarioID, id, item); err != nil {
 			return err
 		}
 	}
@@ -912,10 +1063,10 @@ func promotedBelief(ctx context.Context, st *kernel.Store, sc, claim string) (st
 	if err != nil {
 		return "", err
 	}
-	if err := retireAll(ctx, st, id); err != nil {
+	if err := retireAll(ctx, st, sc, id); err != nil {
 		return "", err
 	}
-	if err := st.Promote(ctx, id); err != nil {
+	if err := st.Promote(ctx, sc, id); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -1040,4 +1191,216 @@ func looksLikeUUID(s string) bool {
 		return false
 	}
 	return s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-'
+}
+
+// --- NEW-01 regression tests: ClaimIntent intent ownership ---
+
+func TestCS_NEW01_HappyPath(t *testing.T) {
+	rec.begin("CS")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sid := scenario(1001)
+
+	bid := mustPromoted(t, ctx, st, sid, "deploy service")
+	if err := st.IntentOnPromoted(ctx, sid, bid, "deploy"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	var intentID string
+	_ = shared.QueryRowContext(ctx,
+		`SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='deploy' AND state='live'`,
+		sid, bid).Scan(&intentID)
+	err := st.ClaimIntent(ctx, sid, intentID, bid, "deploy")
+	if err != nil {
+		t.Fatalf("NEW-01 happy path: expected success, got %v", err)
+	}
+	rec.check(t, err == nil, Case{
+		ID: "NEW-01-hp", Wave: "CS",
+		Purpose:  "ClaimIntent succeeds with correct scenario + belief + action + live intent",
+		Expected: "nil error",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
+}
+
+func TestCS_NEW01_WrongBelief(t *testing.T) {
+	rec.begin("CS")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sid := scenario(1002)
+
+	bidA := mustPromoted(t, ctx, st, sid, "belief A")
+	bidB := mustPromoted(t, ctx, st, sid, "belief B")
+	if err := st.IntentOnPromoted(ctx, sid, bidA, "deploy"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	var intentID string
+	_ = shared.QueryRowContext(ctx,
+		`SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='deploy' AND state='live'`,
+		sid, bidA).Scan(&intentID)
+
+	err := st.ClaimIntent(ctx, sid, intentID, bidB, "deploy")
+	failed := err != nil
+	rec.check(t, failed, Case{
+		ID: "NEW-01-wb", Wave: "CS",
+		Purpose:  "ClaimIntent rejects wrong belief (same scenario, different belief)",
+		Expected: "error",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
+	_ = st.RollbackClaim(ctx, sid, intentID)
+}
+
+func TestCS_NEW01_WrongAction(t *testing.T) {
+	rec.begin("CS")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sid := scenario(1003)
+
+	bid := mustPromoted(t, ctx, st, sid, "deploy service")
+	if err := st.IntentOnPromoted(ctx, sid, bid, "deploy"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	var intentID string
+	_ = shared.QueryRowContext(ctx,
+		`SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='deploy' AND state='live'`,
+		sid, bid).Scan(&intentID)
+
+	err := st.ClaimIntent(ctx, sid, intentID, bid, "rollback")
+	failed := err != nil
+	rec.check(t, failed, Case{
+		ID: "NEW-01-wa", Wave: "CS",
+		Purpose:  "ClaimIntent rejects wrong action (same scenario, same belief, different action)",
+		Expected: "error",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
+	_ = st.RollbackClaim(ctx, sid, intentID)
+}
+
+func TestCS_NEW01_ExactExploit(t *testing.T) {
+	rec.begin("CS")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sid := scenario(1004)
+
+	bidA := mustPromoted(t, ctx, st, sid, "belief A for deploy")
+	bidB := mustPromoted(t, ctx, st, sid, "belief B for rollback")
+	if err := st.IntentOnPromoted(ctx, sid, bidB, "rollback"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	var intentB string
+	_ = shared.QueryRowContext(ctx,
+		`SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='rollback' AND state='live'`,
+		sid, bidB).Scan(&intentB)
+
+	// Try to claim intentB using bidA's tuple — should fail.
+	err := st.ClaimIntent(ctx, sid, intentB, bidA, "deploy")
+	failed := err != nil
+	rec.check(t, failed, Case{
+		ID: "NEW-01-ex", Wave: "CS",
+		Purpose:  "NEW-01 exact exploit: claim intentB with wrong belief+action tuple is rejected",
+		Expected: "error",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
+	_ = st.RollbackClaim(ctx, sid, intentB)
+}
+
+// --- NEW-02 regression tests: IntentOnPromoted scenario isolation ---
+
+func TestCS_NEW02_CrossScenarioRejected(t *testing.T) {
+	rec.begin("CS")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	scA := scenario(1005)
+	scB := scenario(1006)
+
+	bid := mustPromoted(t, ctx, st, scA, "belief in A")
+	err := st.IntentOnPromoted(ctx, scB, bid, "deploy")
+	failed := errors.Is(err, kernel.ErrBeliefNotFound)
+	rec.check(t, failed, Case{
+		ID: "NEW-02-cr", Wave: "CS",
+		Purpose:  "IntentOnPromoted rejects cross-scenario belief",
+		Expected: "ErrBeliefNotFound",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
+}
+
+func TestCS_NEW02_CrossScenarioRetractSucceeds(t *testing.T) {
+	rec.begin("CS")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	scA := scenario(1007)
+	scB := scenario(1008)
+
+	a1 := mustPromoted(t, ctx, st, scA, "root")
+	a2 := mustPromoted(t, ctx, st, scA, "child")
+	edge(t, ctx, a1, a2)
+
+	if err := st.IntentOnPromoted(ctx, scA, a2, "patch"); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	// Cross-scenario intent rejected by NEW-02 fix.
+	err := st.IntentOnPromoted(ctx, scB, a2, "foreign")
+	crossRejected := errors.Is(err, kernel.ErrBeliefNotFound)
+
+	n, retErr := st.RetractCascade(ctx, scA, a1)
+	a2Status, _ := beliefState(t, ctx, a2)
+	atomic := crossRejected && retErr == nil && n == 2 && a2Status == "retracted"
+	rec.check(t, atomic, Case{
+		ID: "NEW-02-ra", Wave: "CS",
+		Purpose:  "Cross-scenario intent rejected + RetractCascade succeeds (no 23514)",
+		Expected: "cross-scenario rejected; retract returns 2; child retracted",
+		Observed: fmt.Sprintf("crossRejected=%v; n=%d; err=%v; child=%q", crossRejected, n, retErr, a2Status),
+	})
+}
+
+func TestCS_NEW02_SameScenarioSucceeds(t *testing.T) {
+	rec.begin("CS")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sid := scenario(1009)
+
+	bid := mustPromoted(t, ctx, st, sid, "belief for intent")
+	err := st.IntentOnPromoted(ctx, sid, bid, "deploy")
+	succeeded := err == nil
+	rec.check(t, succeeded, Case{
+		ID: "NEW-02-ss", Wave: "CS",
+		Purpose:  "Same-scenario IntentOnPromoted succeeds",
+		Expected: "nil error",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
+}
+
+// --- NEW-03 regression tests: AddEvidence scenario isolation ---
+
+func TestCS_NEW03_SameScenarioSucceeds(t *testing.T) {
+	rec.begin("CS")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sid := scenario(1010)
+
+	bid := mustPromoted(t, ctx, st, sid, "belief for evidence")
+	err := st.AddEvidence(ctx, sid, bid, "operator_asserted", "https://example.com/evidence", "abc123")
+	succeeded := err == nil
+	rec.check(t, succeeded, Case{
+		ID: "NEW-03-ss", Wave: "CS",
+		Purpose:  "AddEvidence succeeds with same-scenario belief",
+		Expected: "nil error",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
+}
+
+func TestCS_NEW03_CrossScenarioRejected(t *testing.T) {
+	rec.begin("CS")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	scA := scenario(1011)
+	scB := scenario(1012)
+
+	bid := mustPromoted(t, ctx, st, scA, "belief in A")
+	err := st.AddEvidence(ctx, scB, bid, "operator_asserted", "https://example.com/evidence", "abc123")
+	failed := errors.Is(err, kernel.ErrBeliefNotFound)
+	rec.check(t, failed, Case{
+		ID: "NEW-03-cr", Wave: "CS",
+		Purpose:  "AddEvidence rejects cross-scenario belief",
+		Expected: "ErrBeliefNotFound",
+		Observed: fmt.Sprintf("err=%v", err),
+	})
 }

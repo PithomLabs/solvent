@@ -118,7 +118,7 @@ func (s *Server) refusals(ctx context.Context, scenarioID string) ([]Refusal, er
 // "the same SQL on both screens" is a property of there being one call site rather
 // than a promise to keep two in step.
 func (s *Server) Promote(ctx context.Context, scenarioID, beliefID string) Verdict {
-	if err := s.kern.Promote(ctx, beliefID); err != nil {
+	if err := s.kern.Promote(ctx, scenarioID, beliefID); err != nil {
 		return s.refuse(ctx, scenarioID, StmtPromote, err, "")
 	}
 	return Verdict{OK: true, Statement: StmtPromote, Detail: "COMMIT"}

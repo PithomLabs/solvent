@@ -21,11 +21,11 @@ const (
 
 	sqlRetireDebt = `
 		UPDATE belief SET debt = array_remove(debt, $2::STRING)
-		WHERE id = $1::UUID`
+		WHERE id = $1::UUID AND scenario_id = $3::UUID`
 
 	sqlPromote = `
 		UPDATE belief SET status = 'promoted'
-		WHERE id = $1::UUID`
+		WHERE id = $1::UUID AND scenario_id = $2::UUID`
 
 	sqlIntentOnPromoted = `
 		INSERT INTO action_intent (scenario_id, belief_id, action)
@@ -190,11 +190,13 @@ const (
 
 	sqlDischargeRetireDebt = `
 		UPDATE belief SET debt = array_remove(debt, $2::STRING)
-		WHERE id = $1::UUID`
+		WHERE id = $1::UUID AND scenario_id = $3::UUID`
 
 	sqlClaimIntent = `
 		UPDATE action_intent SET state = 'executing'
-		WHERE id = $1::UUID AND scenario_id = $2::UUID AND state = 'live'`
+		WHERE id = $1::UUID AND scenario_id = $2::UUID
+		  AND belief_id = $3::UUID AND action = $4::STRING
+		  AND state = 'live'`
 
 	sqlCompleteIntent = `
 		UPDATE action_intent SET state = 'executed'

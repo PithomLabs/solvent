@@ -111,11 +111,11 @@ func TestLedger_AuthorizeAndCreateIntent_Allowed(t *testing.T) {
 
 	// Retire all debts so the belief can be promoted.
 	for _, item := range kernel.FullDebt {
-		if err := kern.RetireDebt(ctx, beliefID, item); err != nil {
+		if err := kern.RetireDebt(ctx, scenarioID, beliefID, item); err != nil {
 			t.Fatalf("retire debt %q: %v", item, err)
 		}
 	}
-	if err := kern.Promote(ctx, beliefID); err != nil {
+	if err := kern.Promote(ctx, scenarioID, beliefID); err != nil {
 		t.Fatalf("promote belief: %v", err)
 	}
 

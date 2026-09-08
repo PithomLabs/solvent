@@ -66,7 +66,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 3. Resolve fixture root.
+	// 3. Validate transport mode. MCP is a trusted local administrative surface
+	// that runs on stdio only. Network transports are not supported; selecting
+	// one fails closed to prevent accidental trust-model changes if additional
+	// transports are wired in later.
+	transport := os.Getenv("MCP_TRANSPORT")
+	if transport == "" {
+		transport = "stdio"
+	}
+	if transport != "stdio" {
+		log.Error("unsupported MCP transport",
+			"transport", transport,
+			"supported", "stdio",
+			"note", "MCP is a trusted local surface; network exposure transfers responsibility to the deployment boundary")
+		fmt.Fprintf(os.Stderr,
+			"unsupported MCP transport %q: only stdio is supported\n"+
+				"MCP is a trusted local surface; network exposure transfers responsibility to the deployment boundary\n",
+			transport)
+		os.Exit(1)
+	}
+
+	// 4. Resolve fixture root.
 	fixtureRoot = os.Getenv("SOLVENT_FIXTURE_ROOT")
 	if fixtureRoot == "" {
 		exe, err := os.Executable()
@@ -80,7 +100,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 4. Validate fixture directories exist for pipeline scenarios.
+	// 5. Validate fixture directories exist for pipeline scenarios.
 	for _, s := range scenarios {
 		if !s.PipelineFixtures {
 			continue
@@ -93,7 +113,7 @@ func main() {
 		}
 	}
 
-	// 5. Open DB and ping.
+	// 6. Open DB and ping.
 	var err error
 	db, err = sql.Open("pgx", dsn)
 	if err != nil {
@@ -108,19 +128,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 6. Configure connection pool.
+	// 7. Configure connection pool.
 	db.SetMaxOpenConns(envInt("SOLVENT_DB_MAX_OPEN_CONNS", 25))
 	db.SetMaxIdleConns(envInt("SOLVENT_DB_MAX_IDLE_CONNS", 5))
 	db.SetConnMaxLifetime(envDuration("SOLVENT_DB_CONN_MAX_LIFETIME", 5*time.Minute))
 
-	// 7. Validate schema.
+	// 8. Validate schema.
 	if err := validateSchema(ctx); err != nil {
 		log.Error("schema validation failed", "error", err)
 		fmt.Fprintf(os.Stderr, "schema: %v\n", err)
 		os.Exit(1)
 	}
 
-	// 8. Initialize services.
+	// 9. Initialize services.
 	policySvc := policy.New(db)
 	auditSvc = audit.New(db)
 	execReg := executor.NewRegistry()
@@ -145,7 +165,7 @@ func main() {
 		"github_executor", os.Getenv("GITHUB_TOKEN") != "",
 	)
 
-	// 8. Create MCP server.
+	// 10. Create MCP server.
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "solvent",
 		Version: "v0.1.0",
@@ -550,6 +570,11 @@ func main() {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"scenario": map[string]any{
+					"type":        "string",
+					"enum":        scenarioNames(),
+					"description": "Scenario the belief belongs to",
+				},
 				"belief_id": map[string]any{
 					"type":        "string",
 					"description": "UUID of the belief whose debt is discharged",
@@ -567,7 +592,7 @@ func main() {
 					"description": "UUID of the principal performing the discharge (attribution)",
 				},
 			},
-			"required": []string{"belief_id", "obligation_key", "instrument_ref", "discharged_by"},
+			"required": []string{"scenario", "belief_id", "obligation_key", "instrument_ref", "discharged_by"},
 		},
 	}, toolHandler("solvent_discharge"))
 
@@ -633,7 +658,7 @@ func main() {
 		},
 	}, toolHandler("solvent_activity"))
 
-	// 9. Run on stdio.
+	// 11. Run on stdio.
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {
 		log.Error("server failed", "error", err)
 		fmt.Fprintf(os.Stderr, "server: %v\n", err)

@@ -72,9 +72,9 @@ func promoteTestBelief(t *testing.T, ctx context.Context, st *kernel.Store, sc, 
 		t.Fatalf("setup (ensure belief): %v", err)
 	}
 	for _, item := range kernel.FullDebt {
-		_ = st.RetireDebt(ctx, bid, item)
+		_ = st.RetireDebt(ctx, sc, bid, item)
 	}
-	if err := st.Promote(ctx, bid); err != nil {
+	if err := st.Promote(ctx, sc, bid); err != nil {
 		t.Fatalf("setup (promote belief): %v", err)
 	}
 	return bid

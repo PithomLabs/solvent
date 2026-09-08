@@ -124,11 +124,11 @@ func (s *Server) Seed(ctx context.Context, scenarioID string) error {
 	//    outstanding debt; the descendant keeps all six, which is what screen 1 refuses
 	//    on and screen 2 discharges.
 	for _, d := range kernel.FullDebt {
-		if err := s.kern.RetireDebt(ctx, ancestorID, d); err != nil {
+		if err := s.kern.RetireDebt(ctx, scenarioID, ancestorID, d); err != nil {
 			return fmt.Errorf("wizard: retire %s on ancestor: %w", d, err)
 		}
 	}
-	if err := s.kern.Promote(ctx, ancestorID); err != nil {
+	if err := s.kern.Promote(ctx, scenarioID, ancestorID); err != nil {
 		return fmt.Errorf("wizard: promote ancestor: %w", err)
 	}
 

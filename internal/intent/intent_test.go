@@ -74,11 +74,11 @@ func createPromotedBelief(ctx context.Context, t *testing.T, sc, claim string) s
 		t.Fatalf("EnsureBelief: %v", err)
 	}
 	for _, item := range kernel.FullDebt {
-		if err := st.RetireDebt(ctx, id, item); err != nil {
+		if err := st.RetireDebt(ctx, sc, id, item); err != nil {
 			t.Fatalf("RetireDebt(%s): %v", item, err)
 		}
 	}
-	if err := st.Promote(ctx, id); err != nil {
+	if err := st.Promote(ctx, sc, id); err != nil {
 		t.Fatalf("Promote: %v", err)
 	}
 	return id

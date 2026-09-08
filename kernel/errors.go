@@ -29,6 +29,14 @@ var (
 	ErrTargetNotActivated   = errors.New("target not activated")
 	ErrInvalidProposal      = errors.New("invalid proposal")
 
+	// Scenario-scoped mutation sentinels.
+
+	// ErrBeliefNotFound reports that a belief was not found in the requested
+	// scenario. A nonexistent belief and a belief in a wrong scenario are
+	// intentionally indistinguishable externally to avoid leaking information
+	// across scenario boundaries.
+	ErrBeliefNotFound = errors.New("belief not found in scenario")
+
 	// Execution lifecycle sentinels.
 	ErrIntentNotLive = errors.New("intent is not in live state")
 	ErrNotExecuting  = errors.New("intent is not in executing state")

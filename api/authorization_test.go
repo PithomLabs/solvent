@@ -248,9 +248,9 @@ func setupExecutionScenario(t *testing.T, db *sql.DB) (string, string, string, s
 		t.Fatalf("ensure belief: %v", err)
 	}
 	for _, item := range kernel.FullDebt {
-		_ = st.RetireDebt(ctx, beliefID, item)
+		_ = st.RetireDebt(ctx, scenarioID, beliefID, item)
 	}
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {
 		t.Fatalf("promote belief: %v", err)
 	}
 
@@ -306,9 +306,9 @@ func TestExecute_CrossPrincipalDenied(t *testing.T) {
 		t.Fatalf("ensure belief: %v", err)
 	}
 	for _, item := range kernel.FullDebt {
-		_ = st.RetireDebt(ctx, beliefID, item)
+		_ = st.RetireDebt(ctx, scenarioID, beliefID, item)
 	}
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {
 		t.Fatalf("promote belief: %v", err)
 	}
 

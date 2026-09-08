@@ -119,7 +119,7 @@ func TestExplain_AskBeforePromotion(t *testing.T) {
 	}
 
 	// Verify real DB still refuses
-	if err := st.Promote(ctx, beliefID); err == nil {
+	if err := st.Promote(ctx, sc, beliefID); err == nil {
 		t.Error("expected Promote to be refused with 23514, got nil")
 	}
 	if err := st.IntentOnPromoted(ctx, sc, beliefID, "deploy"); err == nil {
@@ -138,7 +138,7 @@ func TestExplain_PromotionAfterDebtDischarge(t *testing.T) {
 		t.Fatalf("EnterBelief: %v", err)
 	}
 	for _, item := range kernel.FullDebt {
-		if err := st.RetireDebt(ctx, beliefID, item); err != nil {
+		if err := st.RetireDebt(ctx, sc, beliefID, item); err != nil {
 			t.Fatalf("RetireDebt %s: %v", item, err)
 		}
 	}
@@ -153,7 +153,7 @@ func TestExplain_PromotionAfterDebtDischarge(t *testing.T) {
 		t.Errorf("expected CanPromote=true after debt empty, got false: %q", exp.Beliefs[0].PromotionBlockedReason)
 	}
 
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, sc, beliefID); err != nil {
 		t.Fatalf("Promote: %v", err)
 	}
 	snap, _ = view.GetSnapshot(ctx, sharedExplain, sc, view.SnapshotOpts{})
@@ -194,9 +194,9 @@ func TestExplain_ReassessmentFalsification(t *testing.T) {
 		t.Fatalf("EnterBelief: %v", err)
 	}
 	for _, item := range kernel.FullDebt {
-		_ = st.RetireDebt(ctx, beliefID, item)
+		_ = st.RetireDebt(ctx, sc, beliefID, item)
 	}
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, sc, beliefID); err != nil {
 		t.Fatalf("Promote: %v", err)
 	}
 	if err := st.IntentOnPromoted(ctx, sc, beliefID, "deploy"); err != nil {

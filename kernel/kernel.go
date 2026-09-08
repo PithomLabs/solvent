@@ -79,17 +79,40 @@ func (s *Store) EnterBelief(ctx context.Context, scenarioID, claim string, ct Cl
 // was not given. Belief state is unchanged.
 func (s *Store) AddEvidence(ctx context.Context, scenarioID, beliefID, provenanceClass, sourceURL, contentSHA256 string) error {
 	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
+		var exists bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM belief WHERE id = $1::UUID AND scenario_id = $2::UUID)`,
+			beliefID, scenarioID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrBeliefNotFound
+		}
 		_, err := tx.ExecContext(ctx, sqlAddEvidence,
 			scenarioID, beliefID, provenanceClass, sourceURL, contentSHA256)
 		return err
 	})
 }
 
-// RetireDebt removes one debt item. It is idempotent: array_remove on an absent item
-// changes nothing, and affecting zero rows is success, not an error.
-func (s *Store) RetireDebt(ctx context.Context, beliefID, item string) error {
+// RetireDebt removes one debt item. It is idempotent for same-scenario calls:
+// array_remove on an absent item changes nothing, and the existence check passes.
+//
+// Returns ErrBeliefNotFound if the belief does not exist in the given scenario.
+// A nonexistent belief and a belief in a wrong scenario are intentionally
+// indistinguishable externally to avoid leaking information across scenario
+// boundaries.
+func (s *Store) RetireDebt(ctx context.Context, scenarioID, beliefID, item string) error {
 	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, sqlRetireDebt, beliefID, item)
+		var exists bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM belief WHERE id = $1::UUID AND scenario_id = $2::UUID)`,
+			beliefID, scenarioID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrBeliefNotFound
+		}
+		_, err := tx.ExecContext(ctx, sqlRetireDebt, beliefID, item, scenarioID)
 		return err
 	})
 }
@@ -99,9 +122,20 @@ func (s *Store) RetireDebt(ctx context.Context, beliefID, item string) error {
 // The gate is the schema's promoted_is_debt_free CHECK, not this function's: no
 // debt is inspected here. When the database refuses with 23514 the refusal is named
 // ErrPromotionBlocked and the driver error is preserved underneath it.
-func (s *Store) Promote(ctx context.Context, beliefID string) error {
+//
+// Returns ErrBeliefNotFound if the belief does not exist in the given scenario.
+func (s *Store) Promote(ctx context.Context, scenarioID, beliefID string) error {
 	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, sqlPromote, beliefID)
+		var exists bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM belief WHERE id = $1::UUID AND scenario_id = $2::UUID)`,
+			beliefID, scenarioID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrBeliefNotFound
+		}
+		_, err := tx.ExecContext(ctx, sqlPromote, beliefID, scenarioID)
 		return wrapIf(sqlStateCheckViolation, ErrPromotionBlocked, err)
 	})
 }
@@ -110,6 +144,15 @@ func (s *Store) Promote(ctx context.Context, beliefID string) error {
 // It is the single implementation of intent creation used by both IntentOnPromoted
 // (standalone) and AuthorizeAndCreateIntent (composite).
 func createIntentWithinTx(ctx context.Context, tx *sql.Tx, scenarioID, beliefID, action string) error {
+	var exists bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT EXISTS(SELECT 1 FROM belief WHERE id = $1::UUID AND scenario_id = $2::UUID)`,
+		beliefID, scenarioID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrBeliefNotFound
+	}
 	_, err := tx.ExecContext(ctx, sqlIntentOnPromoted, scenarioID, beliefID, action)
 	return wrapIf(sqlStateFKViolation, ErrActionOnUnpromoted, err)
 }

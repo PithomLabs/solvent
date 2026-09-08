@@ -72,16 +72,16 @@ func enterClaim(t *testing.T, sid, claim string, ct kernel.ClaimType) string {
 	return id
 }
 
-func promote(t *testing.T, id string) {
+func promote(t *testing.T, scenarioID, id string) {
 	t.Helper()
 	st := kernel.New(shared)
 	ctx := context.Background()
 	for _, d := range kernel.FullDebt {
-		if err := st.RetireDebt(ctx, id, d); err != nil {
+		if err := st.RetireDebt(ctx, scenarioID, id, d); err != nil {
 			t.Fatalf("RetireDebt(%s): %v", d, err)
 		}
 	}
-	if err := st.Promote(ctx, id); err != nil {
+	if err := st.Promote(ctx, scenarioID, id); err != nil {
 		t.Fatalf("Promote: %v", err)
 	}
 }
@@ -182,8 +182,8 @@ func TestD03_AncestorRetractionIsRefusedWhileDescendantIntentIsLive(t *testing.T
 
 	// Both promoted; the DESCENDANT carries the live intent, as the DISCHARGE screen
 	// will leave it.
-	promote(t, parent)
-	promote(t, child)
+	promote(t, scenarioTier, parent)
+	promote(t, scenarioTier, child)
 	if err := st.IntentOnPromoted(ctx, scenarioTier, child, "deploy etcd v3.5.0"); err != nil {
 		t.Fatalf("IntentOnPromoted: %v", err)
 	}
@@ -252,8 +252,8 @@ func TestD04_KernelRetractCascadeTraversesTheEdgeAndSucceeds(t *testing.T) {
 	if _, err := demoseed.FileDerivationEdge(ctx, shared, sid); err != nil {
 		t.Fatalf("FileDerivationEdge: %v", err)
 	}
-	promote(t, parent)
-	promote(t, child)
+	promote(t, sid, parent)
+	promote(t, sid, child)
 	if err := st.IntentOnPromoted(ctx, sid, child, "deploy etcd v3.5.0"); err != nil {
 		t.Fatalf("IntentOnPromoted: %v", err)
 	}

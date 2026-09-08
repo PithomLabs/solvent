@@ -58,6 +58,7 @@ const (
 
 	// Reconciliation lifecycle.
 	ActivityReconciliationCompleted ActivityType = "reconciliation_completed"
+	ActivityReconciliationFailed    ActivityType = "reconciliation_failed"
 )
 
 // ActivityEntry is one row in the activity ledger.

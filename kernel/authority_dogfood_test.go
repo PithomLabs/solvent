@@ -263,7 +263,7 @@ func TestDocTrust_RepromotionGap(t *testing.T) {
 
 	// Retract then re-promote.
 	_, _ = st.RetractCascade(ctx, sc, bid)
-	_ = st.Promote(ctx, bid)
+	_ = st.Promote(ctx, sc, bid)
 
 	// Authorize may now ALLOW again — accepted v0 gap.
 	result, err := st.Authorize(ctx, tid, dogfoodTuple(pid))
@@ -351,8 +351,8 @@ func TestDocTrust_DuplicateDischarge(t *testing.T) {
 	pid := dogfoodPrincipal(t, ctx, st)
 	bid := dogfoodBelief(t, ctx, st, sc)
 
-	err1 := st.Discharge(ctx, bid, "obligation-1", "instrument-1", pid)
-	err2 := st.Discharge(ctx, bid, "obligation-1", "instrument-1", pid)
+	err1 := st.Discharge(ctx, sc, bid, "obligation-1", "instrument-1", pid)
+	err2 := st.Discharge(ctx, sc, bid, "obligation-1", "instrument-1", pid)
 
 	ok := err1 == nil && err2 != nil
 	rec.check(t, ok, Case{

@@ -144,9 +144,9 @@ func createAndPromoteBelief(t *testing.T, ctx context.Context, st *kernel.Store,
 		t.Fatalf("setup (enter belief): %v", err)
 	}
 	for _, item := range kernel.FullDebt {
-		_ = st.RetireDebt(ctx, id, item)
+		_ = st.RetireDebt(ctx, scenarioID, id, item)
 	}
-	if err := st.Promote(ctx, id); err != nil {
+	if err := st.Promote(ctx, scenarioID, id); err != nil {
 		t.Fatalf("setup (promote belief): %v", err)
 	}
 	return id
@@ -302,9 +302,10 @@ func TestExec02_NoAuthority(t *testing.T) {
 	if err := st.RequestAuthorization(ctx, targetID, principalID); err != nil {
 		t.Fatalf("setup (request authorization): %v", err)
 	}
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -329,13 +330,14 @@ func TestExec03_RevokedAuthority(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec03-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	if err := st.RevokeTarget(ctx, targetID, principalID, "revoked for test"); err != nil {
 		t.Fatalf("setup (revoke): %v", err)
 	}
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -361,10 +363,11 @@ func TestExec04_WrongTarget(t *testing.T) {
 	paramsB := []byte(`{"repo":"org/targetB","workflow":"deploy.yml","ref":"main"}`)
 	targetA := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", paramsA)
 	targetB := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", paramsB)
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Execute against targetB but with targetA's params — kernel detects mismatch.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetB, principalID,
-		"", map[string]interface{}{}, "execution", paramsA)
+		intentID, map[string]interface{}{}, "execution", paramsA)
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -387,10 +390,11 @@ func TestExec05_WrongAction(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec05-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "rollback")
 
 	// Execute with wrong action.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "rollback", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -413,10 +417,11 @@ func TestExec06_WrongActor(t *testing.T) {
 	principalB := createPrincipal(t, ctx, st, "agent", "exec06-issuerB")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalA, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Execute with wrong actor.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalB,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -469,6 +474,7 @@ func TestExec08_RevocationBeforeFinalCheck(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec08-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Revoke BEFORE calling ExecuteAction — PrepareForAction re-reads and detects.
 	if err := st.RevokeTarget(ctx, targetID, principalID, "revoked before execution"); err != nil {
@@ -476,7 +482,7 @@ func TestExec08_RevocationBeforeFinalCheck(t *testing.T) {
 	}
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -755,6 +761,7 @@ func TestExec15A_RevocationBeforeCheck_MustDeny(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec15a-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Revoke BEFORE calling ExecuteAction — PrepareForAction detects it.
 	if err := st.RevokeTarget(ctx, targetID, principalID, "revoked before check"); err != nil {
@@ -762,7 +769,7 @@ func TestExec15A_RevocationBeforeCheck_MustDeny(t *testing.T) {
 	}
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction returned error: %v", err)
 	}
@@ -869,6 +876,7 @@ func TestExec16_TargetChangedBeforeExecution(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec16-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Prepare succeeds.
 	decision, err := svc.PrepareForAction(ctx, sid, beliefID, "deploy", targetID, principalID, "execution", testConsequenceParams())
@@ -885,7 +893,7 @@ func TestExec16_TargetChangedBeforeExecution(t *testing.T) {
 	}
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -947,10 +955,11 @@ func TestExec18_StaleExecutionParameters(t *testing.T) {
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy",
 		[]byte(`{"repo":"org/approved","workflow":"deploy.yml","ref":"main"}`))
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Execute with stale (different) parameters — PrepareForAction re-reads and kernel rejects.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution",
+		intentID, map[string]interface{}{}, "execution",
 		[]byte(`{"repo":"org/stale","workflow":"deploy.yml","ref":"main"}`))
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
@@ -973,6 +982,7 @@ func TestExec19_StaleAuthorization(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec19-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Revoke to create stale authority.
 	if err := st.RevokeTarget(ctx, targetID, principalID, "revoked for stale test"); err != nil {
@@ -981,7 +991,7 @@ func TestExec19_StaleAuthorization(t *testing.T) {
 
 	// Execute — PrepareForAction re-reads and detects revocation.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -1341,7 +1351,7 @@ func TestExec30_CompleteIntentNotCallableFromPublicPath(t *testing.T) {
 	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Claim the intent first (live → executing), then complete it.
-	if err := st.ClaimIntent(ctx, sid, intentID); err != nil {
+	if err := st.ClaimIntent(ctx, sid, intentID, beliefID, "deploy"); err != nil {
 		t.Fatalf("kernel.ClaimIntent should be callable: %v", err)
 	}
 
@@ -1447,6 +1457,7 @@ func TestExec32_AuditDeniedExecution(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec32-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Revoke to cause denial.
 	if err := st.RevokeTarget(ctx, targetID, principalID, "revoked for audit test"); err != nil {
@@ -1454,7 +1465,7 @@ func TestExec32_AuditDeniedExecution(t *testing.T) {
 	}
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -1814,10 +1825,11 @@ func TestAT01_RemoveAuthorizationCheck(t *testing.T) {
 
 	sid := testScenario(101)
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// No target exists. Authorization must fail.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "nonexistent-target", "nonexistent-actor",
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -1840,10 +1852,11 @@ func TestAT02_ChangeTargetID(t *testing.T) {
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetA := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
 	targetB := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Execute against targetB — authorization checks targetB.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetB, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -1866,10 +1879,11 @@ func TestAT03_ChangeAction(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "at03-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "rollback")
 
 	// Execute with wrong action — must be denied.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "rollback", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -1891,13 +1905,14 @@ func TestAT04_RevokeBeforeExecution(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "at04-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Revoke, then execute.
 	if err := st.RevokeTarget(ctx, targetID, principalID, "revoked for AT04"); err != nil {
 		t.Fatalf("setup (revoke): %v", err)
 	}
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -1958,10 +1973,11 @@ func TestAT06_ForceExecutorWithDeniedAuth(t *testing.T) {
 
 	sid := testScenario(106)
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// No authority exists. Authorization denies. Executor must not be called.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "no-target", "no-actor",
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -2070,6 +2086,7 @@ func TestAT10_StaleAuthorizationReuse(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "at10-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// First authorization succeeds.
 	decision, err := svc.PrepareForAction(ctx, sid, beliefID, "deploy", targetID, principalID, "execution", testConsequenceParams())
@@ -2087,7 +2104,7 @@ func TestAT10_StaleAuthorizationReuse(t *testing.T) {
 
 	// Second execution uses fresh state — must be denied.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -2109,6 +2126,7 @@ func TestAT11_RevokeBeforeExecution_Enforced(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "at11-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Revoke before execution — PrepareForAction detects it.
 	if err := st.RevokeTarget(ctx, targetID, principalID, "revoked for AT11"); err != nil {
@@ -2116,7 +2134,7 @@ func TestAT11_RevokeBeforeExecution_Enforced(t *testing.T) {
 	}
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}
@@ -2368,7 +2386,7 @@ func TestExec41_ClaimIntentAtomicity(t *testing.T) {
 	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// First claim succeeds.
-	err := st.ClaimIntent(ctx, sid, intentID)
+	err := st.ClaimIntent(ctx, sid, intentID, beliefID, "deploy")
 	if err != nil {
 		t.Fatalf("first ClaimIntent should succeed: %v", err)
 	}
@@ -2384,7 +2402,7 @@ func TestExec41_ClaimIntentAtomicity(t *testing.T) {
 	}
 
 	// Second claim fails — intent is no longer 'live'.
-	err = st.ClaimIntent(ctx, sid, intentID)
+	err = st.ClaimIntent(ctx, sid, intentID, beliefID, "deploy")
 	if err == nil {
 		t.Errorf("second ClaimIntent should fail (intent already claimed)")
 	}
@@ -2489,13 +2507,13 @@ func TestExec44_CrashRecoveryNoAutoRetry(t *testing.T) {
 	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Simulate: ClaimIntent succeeds, then "crash" (we don't call provider or CompleteIntent).
-	err := st.ClaimIntent(ctx, sid, intentID)
+	err := st.ClaimIntent(ctx, sid, intentID, beliefID, "deploy")
 	if err != nil {
 		t.Fatalf("ClaimIntent error: %v", err)
 	}
 
 	// Intent is now 'executing'. Any retry via ClaimIntent must fail.
-	err = st.ClaimIntent(ctx, sid, intentID)
+	err = st.ClaimIntent(ctx, sid, intentID, beliefID, "deploy")
 	if err == nil {
 		t.Errorf("retry ClaimIntent should fail after simulated crash")
 	}
@@ -2521,7 +2539,7 @@ func TestExec45_RetractCascadePreservesExecuting(t *testing.T) {
 	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Claim the intent (live → executing).
-	err := st.ClaimIntent(ctx, sid, intentID)
+	err := st.ClaimIntent(ctx, sid, intentID, beliefID, "deploy")
 	if err != nil {
 		t.Fatalf("ClaimIntent error: %v", err)
 	}
@@ -2665,7 +2683,7 @@ func TestExec55_AuthorizeClaimRace(t *testing.T) {
 		<-revocationDone // wait: revocation committed
 
 		// T3: ClaimIntent (CAS on intent state)
-		claimErr = st.ClaimIntent(ctx, sid, intentID)
+		claimErr = st.ClaimIntent(ctx, sid, intentID, beliefID, "deploy")
 		_ = shared.QueryRowContext(ctx, `SELECT state FROM action_intent WHERE id = $1::UUID`, intentID).Scan(&claimState)
 	}()
 
@@ -2778,7 +2796,7 @@ func TestExec51_Adv_RetractDuringExecution(t *testing.T) {
 	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Claim intent.
-	err := st.ClaimIntent(ctx, sid, intentID)
+	err := st.ClaimIntent(ctx, sid, intentID, beliefID, "deploy")
 	if err != nil {
 		t.Fatalf("ClaimIntent error: %v", err)
 	}
@@ -2811,6 +2829,7 @@ func TestExec53_Adv_ExecuteAfterRevocation(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec53-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "etcd is safe")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy", testConsequenceParams())
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Revoke.
 	if err := st.RevokeTarget(ctx, targetID, principalID, "revoked for AT53"); err != nil {
@@ -2819,7 +2838,7 @@ func TestExec53_Adv_ExecuteAfterRevocation(t *testing.T) {
 
 	// Execute — PrepareForAction detects revocation.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
-		"", map[string]interface{}{}, "execution", testConsequenceParams())
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
 	}

@@ -100,7 +100,7 @@ func TestG_PromotionBlocked(t *testing.T) {
 	}
 
 	st := kernel.New(testDB)
-	err = st.Promote(ctx, res.BeliefID)
+	err = st.Promote(ctx, sc, res.BeliefID)
 	if err == nil {
 		t.Fatal("promote succeeded on injected belief, want ErrPromotionBlocked")
 	}

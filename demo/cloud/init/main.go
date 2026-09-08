@@ -184,13 +184,13 @@ func seed(ctx context.Context, db *sql.DB) {
 	fmt.Println("Step 3: Retiring debts, promoting, creating intent...")
 
 	for _, d := range kernel.FullDebt {
-		if err := st.RetireDebt(ctx, beliefID, d); err != nil {
+		if err := st.RetireDebt(ctx, scenarioID, beliefID, d); err != nil {
 			log.Fatalf("Step 3 RetireDebt(%s): %v", d, err)
 		}
 		fmt.Printf("Step 3: retired: %s\n", d)
 	}
 
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {
 		log.Fatalf("Step 3 Promote: %v", err)
 	}
 	fmt.Println("Step 3: promoted: ok")
