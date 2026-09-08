@@ -31,7 +31,7 @@ func Example_lifecycle() {
 	// A claim enters free: status 'entered', carrying the full starting debt.
 	// Ideas are never gated at the door; only actions are.
 	beliefID, err := st.EnterBelief(ctx, exampleScenario,
-		"etcd v3.5.0 is approved for production deployment", kernel.Postulated)
+		"etcd v3.5.0 is approved for production deployment", kernel.Postulated, kernel.FullDebt)
 	if err != nil {
 		fmt.Println("EnterBelief:", err)
 		return

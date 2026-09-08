@@ -214,7 +214,7 @@ func TestT05_BeliefFKRejected(t *testing.T) {
 	targetID := createTestTarget(t, ctx, st, principal, principal)
 
 	// Create a real belief to get a valid belief_id.
-	beliefID, err := st.EnterBelief(ctx, authScenario(5), "belief for FK test", kernel.Derived)
+	beliefID, err := st.EnterBelief(ctx, authScenario(5), "belief for FK test", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("setup: %v", err)
 	}

@@ -16,7 +16,7 @@ func TestOperatorReview_PromoteWithoutAction(t *testing.T) {
 	st := kernel.New(shared)
 
 	scenarioID := "11111111-1111-1111-1111-111111111111"
-	beliefID, err := st.EnterBelief(ctx, scenarioID, "operator-review: no action", kernel.Derived)
+	beliefID, err := st.EnterBelief(ctx, scenarioID, "operator-review: no action", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("enter belief: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestOperatorReview_PromoteWithAction(t *testing.T) {
 	st := kernel.New(shared)
 
 	scenarioID := "22222222-2222-2222-2222-222222222222"
-	beliefID, err := st.EnterBelief(ctx, scenarioID, "operator-review: with action", kernel.Derived)
+	beliefID, err := st.EnterBelief(ctx, scenarioID, "operator-review: with action", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("enter belief: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestOperatorReview_UnpromotedBelief(t *testing.T) {
 	st := kernel.New(shared)
 
 	scenarioID := "33333333-3333-3333-3333-333333333333"
-	beliefID, err := st.EnterBelief(ctx, scenarioID, "operator-review: unpromoted", kernel.Derived)
+	beliefID, err := st.EnterBelief(ctx, scenarioID, "operator-review: unpromoted", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("enter belief: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestOperatorReview_FailedPromotion(t *testing.T) {
 	st := kernel.New(shared)
 
 	scenarioID := "44444444-4444-4444-4444-444444444444"
-	beliefID, err := st.EnterBelief(ctx, scenarioID, "operator-review: failed promote", kernel.Derived)
+	beliefID, err := st.EnterBelief(ctx, scenarioID, "operator-review: failed promote", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("enter belief: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestOperatorReview_ScenarioGuard_RejectsMismatch(t *testing.T) {
 	scenarioA := "55555555-5555-5555-5555-555555555555"
 	scenarioB := "66666666-6666-6666-6666-666666666666"
 
-	beliefID, err := st.EnterBelief(ctx, scenarioA, "scenario-guard: belief in A", kernel.Derived)
+	beliefID, err := st.EnterBelief(ctx, scenarioA, "scenario-guard: belief in A", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("enter belief: %v", err)
 	}

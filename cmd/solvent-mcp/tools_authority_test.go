@@ -68,7 +68,7 @@ func TestMain(m *testing.M) {
 // promoteTestBelief creates a belief, retires all debt, and promotes it.
 func promoteTestBelief(t *testing.T, ctx context.Context, st *kernel.Store, sc, claim string) string {
 	t.Helper()
-	bid, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived)
+	bid, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("setup (ensure belief): %v", err)
 	}

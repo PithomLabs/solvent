@@ -95,7 +95,7 @@ func createTestTarget(t *testing.T, ctx context.Context, principalID string) str
 
 func createTestBelief(t *testing.T, ctx context.Context, scenarioID string) string {
 	t.Helper()
-	id, err := kern.EnterBelief(ctx, scenarioID, "test belief for ledger", kernel.Derived)
+	id, err := kern.EnterBelief(ctx, scenarioID, "test belief for ledger", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("create belief: %v", err)
 	}
@@ -215,5 +215,51 @@ func TestLedger_AuthorizeAndCreateIntent_Denied(t *testing.T) {
 	}
 	if cnt != 0 {
 		t.Errorf("expected 0 intents, got %d", cnt)
+	}
+}
+
+func TestLedger_DomainPortableVocab(t *testing.T) {
+	ctx := context.Background()
+	scenarioID := fmt.Sprintf("00000000-0000-0000-0000-%012x", time.Now().UnixNano()%0xFFFFFFFFFFFF)
+
+	// Physics-domain caller: arbitrary vocabulary, NOT kernel.FullDebt.
+	physicsVocab := []string{"proof_check", "counterexample_search", "applicability_review"}
+	beliefID, err := kern.EnterBelief(ctx, scenarioID, "quantum superposition holds", kernel.Derived, physicsVocab)
+	if err != nil {
+		t.Fatalf("EnterBelief with arbitrary vocab: %v", err)
+	}
+
+	// Verify the service did NOT inject FullDebt.
+	var stored string
+	if err := db.QueryRowContext(ctx,
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&stored); err != nil {
+		t.Fatalf("read debt: %v", err)
+	}
+	if stored != "proof_check,counterexample_search,applicability_review" {
+		t.Errorf("expected physics vocab stored unchanged, got %q", stored)
+	}
+
+	// Retire one arbitrary item to prove the kernel treats names as opaque.
+	if err := kern.RetireDebt(ctx, scenarioID, beliefID, "counterexample_search"); err != nil {
+		t.Fatalf("RetireDebt: %v", err)
+	}
+
+	var afterRetire string
+	if err := db.QueryRowContext(ctx,
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&afterRetire); err != nil {
+		t.Fatalf("read debt: %v", err)
+	}
+	if afterRetire != "proof_check,applicability_review" {
+		t.Errorf("expected proof_check,applicability_review after retire, got %q", afterRetire)
+	}
+
+	// Retire remaining items and promote to prove full lifecycle works.
+	for _, item := range []string{"proof_check", "applicability_review"} {
+		if err := kern.RetireDebt(ctx, scenarioID, beliefID, item); err != nil {
+			t.Fatalf("RetireDebt %q: %v", item, err)
+		}
+	}
+	if err := kern.Promote(ctx, scenarioID, beliefID); err != nil {
+		t.Fatalf("Promote: %v", err)
 	}
 }

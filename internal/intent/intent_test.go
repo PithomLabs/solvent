@@ -70,7 +70,7 @@ func scenario(n int) string {
 func createPromotedBelief(ctx context.Context, t *testing.T, sc, claim string) string {
 	t.Helper()
 	st := kernel.New(shared)
-	id, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived)
+	id, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("EnsureBelief: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestPropose_OnUnpromotedBelief(t *testing.T) {
 	sc := scenario(2)
 	st := kernel.New(shared)
 
-	beliefID, err := st.EnsureBelief(ctx, sc, "unpromoted belief", kernel.Derived)
+	beliefID, err := st.EnsureBelief(ctx, sc, "unpromoted belief", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("EnsureBelief: %v", err)
 	}

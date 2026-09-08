@@ -69,7 +69,7 @@ func TestExplain_AskBeforePromotion(t *testing.T) {
 	sc := scenarioExplain(1)
 	st := kernel.New(sharedExplain)
 
-	beliefID, err := st.EnterBelief(ctx, sc, "explain test: ask before promotion", kernel.Derived)
+	beliefID, err := st.EnterBelief(ctx, sc, "explain test: ask before promotion", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("EnterBelief: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestExplain_PromotionAfterDebtDischarge(t *testing.T) {
 	sc := scenarioExplain(2)
 	st := kernel.New(sharedExplain)
 
-	beliefID, err := st.EnterBelief(ctx, sc, "explain test: promotion after discharge", kernel.Derived)
+	beliefID, err := st.EnterBelief(ctx, sc, "explain test: promotion after discharge", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("EnterBelief: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestExplain_ReassessmentFalsification(t *testing.T) {
 	sc := scenarioExplain(3)
 	st := kernel.New(sharedExplain)
 
-	beliefID, err := st.EnterBelief(ctx, sc, "explain test: reassessment", kernel.Derived)
+	beliefID, err := st.EnterBelief(ctx, sc, "explain test: reassessment", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("EnterBelief: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestExplain_ReadOnly(t *testing.T) {
 	ctx := context.Background()
 	sc := scenarioExplain(4)
 	st := kernel.New(sharedExplain)
-	beliefID, _ := st.EnterBelief(ctx, sc, "read-only test", kernel.Derived)
+	beliefID, _ := st.EnterBelief(ctx, sc, "read-only test", kernel.Derived, kernel.FullDebt)
 
 	beforeCount := countBeliefs(t, ctx, sc)
 	snap, _ := view.GetSnapshot(ctx, sharedExplain, sc, view.SnapshotOpts{BeliefID: beliefID, IncludeEvidence: true})

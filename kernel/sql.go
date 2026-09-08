@@ -43,8 +43,8 @@ const (
 			LIMIT 1
 		),
 		inserted AS (
-			INSERT INTO belief (scenario_id, claim, claim_type)
-			SELECT $1::UUID, $2::STRING, $3::STRING
+			INSERT INTO belief (scenario_id, claim, claim_type, debt)
+			SELECT $1::UUID, $2::STRING, $3::STRING, $4::STRING[]
 			WHERE NOT EXISTS (SELECT 1 FROM existing)
 			RETURNING id
 		)

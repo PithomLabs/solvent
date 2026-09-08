@@ -99,7 +99,7 @@ func (s *Server) Seed(ctx context.Context, scenarioID string) error {
 	}
 
 	// 1. The standing assumption, with its operator-asserted provenance.
-	ancestorID, err := s.kern.EnterBelief(ctx, scenarioID, AncestorClaim, kernel.Postulated)
+	ancestorID, err := s.kern.EnterBelief(ctx, scenarioID, AncestorClaim, kernel.Postulated, kernel.FullDebt)
 	if err != nil {
 		return fmt.Errorf("wizard: enter ancestor: %w", err)
 	}
@@ -111,7 +111,7 @@ func (s *Server) Seed(ctx context.Context, scenarioID string) error {
 
 	// 2. The claim the judge will drive. Full debt, untouched — the six items the DDL
 	//    default issued are exactly what screen 1 is refused on.
-	if _, err := s.kern.EnterBelief(ctx, scenarioID, DescendantClaim, kernel.Derived); err != nil {
+	if _, err := s.kern.EnterBelief(ctx, scenarioID, DescendantClaim, kernel.Derived, kernel.FullDebt); err != nil {
 		return fmt.Errorf("wizard: enter descendant: %w", err)
 	}
 

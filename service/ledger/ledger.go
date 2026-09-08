@@ -50,8 +50,8 @@ func New(db *sql.DB, aud *audit.Service) *Service {
 // --- Passthrough operations (kernel method is self-contained) ---
 
 // EnterBelief delegates to kernel.EnterBelief.
-func (s *Service) EnterBelief(ctx context.Context, scenarioID, claim string, ct kernel.ClaimType) (string, error) {
-	return s.kern.EnterBelief(ctx, scenarioID, claim, ct)
+func (s *Service) EnterBelief(ctx context.Context, scenarioID, claim string, ct kernel.ClaimType, initialDebt []string) (string, error) {
+	return s.kern.EnterBelief(ctx, scenarioID, claim, ct, initialDebt)
 }
 
 // AddEvidence delegates to kernel.AddEvidence.

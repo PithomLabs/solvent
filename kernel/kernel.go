@@ -58,9 +58,13 @@ func New(db *sql.DB) *Store { return &Store{db: db} }
 // Callers must handle duplicate creation gracefully. This is an accepted v0
 // limitation. Fixing it requires a unique constraint on (scenario_id, claim),
 // which changes the frozen schema.
-func (s *Store) EnterBelief(ctx context.Context, scenarioID, claim string, ct ClaimType) (string, error) {
-	// A copy, so a caller that mutates FullDebt cannot corrupt this write.
-	debt := append([]string(nil), FullDebt...)
+func (s *Store) EnterBelief(ctx context.Context, scenarioID, claim string, ct ClaimType, initialDebt []string) (string, error) {
+	// Ensure non-nil for the driver: a nil slice would be sent as NULL,
+	// which violates the NOT NULL constraint on the debt column.
+	debt := initialDebt
+	if debt == nil {
+		debt = []string{}
+	}
 
 	var id string
 	err := crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
@@ -240,16 +244,19 @@ func (s *Store) AuditLiveOnNonPromoted(ctx context.Context, scenarioID string) (
 }
 
 // EnsureBelief returns the ID of a belief with the given claim in the scenario.
-// If no such belief exists, it creates one with the given claim type, full starting
-// debt, and status='entered'.
+// If no such belief exists, it creates one with the given claim type, caller-supplied
+// initial debt, and status='entered'. If a belief already exists, its debt is unchanged.
 //
 // The find-or-create is a single transaction — no TOCTOU boundary.
 // The caller does not need to know whether the belief was newly created.
-func (s *Store) EnsureBelief(ctx context.Context, scenarioID, claim string, ct ClaimType) (string, error) {
+func (s *Store) EnsureBelief(ctx context.Context, scenarioID, claim string, ct ClaimType, initialDebt []string) (string, error) {
+	// A copy, so a caller that mutates the slice cannot corrupt this write.
+	debt := append([]string(nil), initialDebt...)
+
 	var id string
 	err := crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
 		return tx.QueryRowContext(ctx, sqlEnsureBelief,
-			scenarioID, claim, string(ct),
+			scenarioID, claim, string(ct), debt,
 		).Scan(&id)
 	})
 	if err != nil {

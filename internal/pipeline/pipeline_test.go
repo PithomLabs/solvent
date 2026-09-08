@@ -394,7 +394,7 @@ func TestEndToEnd_ProposeIfNew_Idempotent(t *testing.T) {
 
 	// Create a promoted belief.
 	st := kernel.New(shared)
-	beliefID, err := st.EnsureBelief(ctx, sc, "test belief for idempotency", kernel.Derived)
+	beliefID, err := st.EnsureBelief(ctx, sc, "test belief for idempotency", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("EnsureBelief: %v", err)
 	}

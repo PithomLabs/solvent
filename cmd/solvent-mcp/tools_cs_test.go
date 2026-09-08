@@ -19,7 +19,7 @@ func TestCS_Discharge_WrongScenario_MCP(t *testing.T) {
 
 	// Create belief in track1.
 	bid, err := st.EnsureBelief(ctx, "00000000-0000-0000-0000-000000000001",
-		"belief for MCP cross-scenario discharge", kernel.Derived)
+		"belief for MCP cross-scenario discharge", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("setup: ensure belief: %v", err)
 	}
