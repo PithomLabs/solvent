@@ -140,7 +140,7 @@ func createPrincipal(t *testing.T, ctx context.Context, st *kernel.Store, ptype,
 
 func createAndPromoteBelief(t *testing.T, ctx context.Context, st *kernel.Store, scenarioID, claim string) string {
 	t.Helper()
-	id, err := st.EnterBelief(ctx, scenarioID, claim, kernel.Derived)
+	id, err := st.EnterBelief(ctx, scenarioID, claim, kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("setup (enter belief): %v", err)
 	}

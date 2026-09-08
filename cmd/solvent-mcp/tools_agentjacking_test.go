@@ -126,7 +126,7 @@ func TestAJ_UnpromotedBelief_AuthorityDenied(t *testing.T) {
 	// Do NOT approve — target is unactivated.
 
 	// Create an unpromoted belief.
-	bid, err := st.EnsureBelief(ctx, "00000000-0000-0000-0000-000000000001", "unpromoted test belief", kernel.Derived)
+	bid, err := st.EnsureBelief(ctx, "00000000-0000-0000-0000-000000000001", "unpromoted test belief", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("setup: ensure belief: %v", err)
 	}

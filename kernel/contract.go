@@ -14,14 +14,14 @@ import (
 //
 // Not versioned: this is the contract, and its history lives in git.
 type Contract interface {
-	EnterBelief(context.Context, string, string, ClaimType) (string, error)
+	EnterBelief(ctx context.Context, scenarioID, claim string, ct ClaimType, initialDebt []string) (string, error)
 	AddEvidence(context.Context, string, string, string, string, string) error
 	RetireDebt(context.Context, string, string, string) error
 	Promote(context.Context, string, string) error
 	IntentOnPromoted(context.Context, string, string, string) error
 	RetractCascade(context.Context, string, string) (int, error)
 	AuditLiveOnNonPromoted(context.Context, string) (int, error)
-	EnsureBelief(context.Context, string, string, ClaimType) (string, error)
+	EnsureBelief(ctx context.Context, scenarioID, claim string, ct ClaimType, initialDebt []string) (string, error)
 
 	// Authority lifecycle.
 	CreatePrincipal(context.Context, string, string) (string, error)

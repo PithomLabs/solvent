@@ -358,7 +358,7 @@ func TestC07_CitationConnectsCorpusToBelief(t *testing.T) {
 	st := kernel.New(shared)
 
 	beliefID, err := st.EnterBelief(ctx, scenarioA,
-		"etcd leader election is unstable under partition", kernel.Derived)
+		"etcd leader election is unstable under partition", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatal(err)
 	}

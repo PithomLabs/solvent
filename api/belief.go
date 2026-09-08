@@ -30,7 +30,7 @@ func (s *Server) handleEnterBelief(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := s.ledger.EnterBelief(r.Context(), req.ScenarioID, req.Claim, kernel.ClaimType(req.ClaimType))
+	id, err := s.ledger.EnterBelief(r.Context(), req.ScenarioID, req.Claim, kernel.ClaimType(req.ClaimType), kernel.FullDebt)
 	if err != nil {
 		writeKernelError(w, err, "")
 		return

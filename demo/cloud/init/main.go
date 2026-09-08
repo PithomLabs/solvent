@@ -167,7 +167,7 @@ func seed(ctx context.Context, db *sql.DB) {
 
 	// Step 2: Enter baseline postulated belief.
 	fmt.Println("Step 2: Entering baseline belief...")
-	beliefID, err := st.EnterBelief(ctx, scenarioID, baselineClaim, kernel.Postulated)
+	beliefID, err := st.EnterBelief(ctx, scenarioID, baselineClaim, kernel.Postulated, kernel.FullDebt)
 	if err != nil {
 		log.Fatalf("Step 2 EnterBelief: %v", err)
 	}

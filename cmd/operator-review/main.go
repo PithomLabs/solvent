@@ -116,7 +116,7 @@ func runEnterMode(ctx context.Context, st *kernel.Store, db *sql.DB, scenarioID,
 		fail("--claim-type must be 'postulated' for the entry path")
 	}
 
-	beliefID, err := st.EnterBelief(ctx, scenarioID, claim, kernel.Postulated)
+	beliefID, err := st.EnterBelief(ctx, scenarioID, claim, kernel.Postulated, kernel.FullDebt)
 	if err != nil {
 		fail(fmt.Sprintf("enter belief: %v", err))
 	}

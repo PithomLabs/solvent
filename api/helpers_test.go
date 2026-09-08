@@ -160,7 +160,7 @@ func createTestTarget(t *testing.T, db *sql.DB, principalID string) string {
 func createTestBelief(t *testing.T, db *sql.DB, scenarioID string) string {
 	t.Helper()
 	id, err := kernel.New(db).EnterBelief(context.Background(), scenarioID,
-		"Test belief for API tests", kernel.Derived)
+		"Test belief for API tests", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("create belief: %v", err)
 	}

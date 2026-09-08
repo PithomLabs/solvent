@@ -243,7 +243,7 @@ func setupExecutionScenario(t *testing.T, db *sql.DB) (string, string, string, s
 	principalID := testPrincipalID
 
 	// Create and promote belief.
-	beliefID, err := st.EnsureBelief(ctx, scenarioID, "test belief for execution", kernel.Derived)
+	beliefID, err := st.EnsureBelief(ctx, scenarioID, "test belief for execution", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("ensure belief: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestExecute_CrossPrincipalDenied(t *testing.T) {
 	otherPrincipalID := createTestPrincipal(t, db)
 
 	// Create and promote belief under otherPrincipalID.
-	beliefID, err := st.EnsureBelief(ctx, scenarioID, "cross-principal belief", kernel.Derived)
+	beliefID, err := st.EnsureBelief(ctx, scenarioID, "cross-principal belief", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("ensure belief: %v", err)
 	}
@@ -412,7 +412,7 @@ func TestExecute_WrongBeliefDenied(t *testing.T) {
 	// Create a different belief in the same scenario.
 	ctx := context.Background()
 	st := kernel.New(db)
-	wrongBeliefID, err := st.EnsureBelief(ctx, scenarioID, "wrong belief", kernel.Derived)
+	wrongBeliefID, err := st.EnsureBelief(ctx, scenarioID, "wrong belief", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("ensure wrong belief: %v", err)
 	}
@@ -570,7 +570,7 @@ func setupBoundExecutionScenario(t *testing.T, db *sql.DB) (string, string, stri
 	scenarioID := createTestScenario(t)
 	principalID := testPrincipalID
 
-	beliefID, err := st.EnsureBelief(ctx, scenarioID, "test belief for bound execution", kernel.Derived)
+	beliefID, err := st.EnsureBelief(ctx, scenarioID, "test belief for bound execution", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("ensure belief: %v", err)
 	}
@@ -637,7 +637,7 @@ func TestExecute_ConfusedDeputy(t *testing.T) {
 	principalID := testPrincipalID
 
 	// Create and promote belief.
-	beliefID, err := st.EnsureBelief(ctx, scenarioID, "confused deputy belief", kernel.Derived)
+	beliefID, err := st.EnsureBelief(ctx, scenarioID, "confused deputy belief", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("ensure belief: %v", err)
 	}

@@ -66,7 +66,7 @@ func TestMain(m *testing.M) {
 // enterClaim creates a belief with the exact claim text the edge matches on.
 func enterClaim(t *testing.T, sid, claim string, ct kernel.ClaimType) string {
 	t.Helper()
-	id, err := kernel.New(shared).EnterBelief(context.Background(), sid, claim, ct)
+	id, err := kernel.New(shared).EnterBelief(context.Background(), sid, claim, ct, kernel.FullDebt)
 	if err != nil {
 		t.Fatalf("EnterBelief(%q): %v", claim, err)
 	}

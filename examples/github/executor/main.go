@@ -79,7 +79,7 @@ func main() {
 	}
 
 	// Create a promoted belief.
-	beliefID, err := st.EnterBelief(ctx, sid, "etcd v3.5.x is safe to deploy", kernel.Derived)
+	beliefID, err := st.EnterBelief(ctx, sid, "etcd v3.5.x is safe to deploy", kernel.Derived, kernel.FullDebt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "enter belief: %v\n", err)
 		os.Exit(1)
