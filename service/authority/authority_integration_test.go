@@ -8,11 +8,11 @@ import (
 	"os"
 	"testing"
 
+	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/kernel"
 	"github.com/PithomLabs/solvent/service/audit"
 	"github.com/PithomLabs/solvent/service/executor"
 	"github.com/PithomLabs/solvent/service/policy"
-	"github.com/PithomLabs/solvent/internal/testdb"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -42,6 +42,7 @@ var schemaPaths = []string{
 	"../../db/006_authority_justification_cascade.sql",
 	"../../db/007_service_tables.sql",
 	"../../db/008_executing_state.sql",
+	"../../db/009_exact_authority_binding.sql",
 }
 
 func TestMain(m *testing.M) {
@@ -140,18 +141,39 @@ func createApprovedTarget(t *testing.T, ctx context.Context, st *kernel.Store, s
 }
 
 // createLiveIntent inserts a live action intent and returns its ID.
-func createLiveIntent(t *testing.T, ctx context.Context, db *sql.DB, scenarioID, beliefID, action string) string {
+func createLiveIntent(t *testing.T, ctx context.Context, db *sql.DB, scenarioID, beliefID, action string, opts ...string) string {
 	t.Helper()
 	var id string
-	err := db.QueryRowContext(ctx, `
-		INSERT INTO action_intent (scenario_id, belief_id, action)
-		VALUES ($1::UUID, $2::UUID, $3::STRING)
-		RETURNING id`,
-		scenarioID, beliefID, action).Scan(&id)
+	var err error
+	if len(opts) >= 2 && opts[0] != "" && opts[1] != "" {
+		err = db.QueryRowContext(ctx, `
+			INSERT INTO action_intent (scenario_id, belief_id, action, target_id, snapshot_id)
+			VALUES ($1::UUID, $2::UUID, $3::STRING, $4::UUID, $5::UUID)
+			RETURNING id`,
+			scenarioID, beliefID, action, opts[0], opts[1]).Scan(&id)
+	} else {
+		err = db.QueryRowContext(ctx, `
+			INSERT INTO action_intent (scenario_id, belief_id, action)
+			VALUES ($1::UUID, $2::UUID, $3::STRING)
+			RETURNING id`,
+			scenarioID, beliefID, action).Scan(&id)
+	}
 	if err != nil {
 		t.Fatalf("setup (create live intent): %v", err)
 	}
 	return id
+}
+
+func lookupSnapshotID(t *testing.T, ctx context.Context, db *sql.DB, targetID string) string {
+	t.Helper()
+	var snapshotID string
+	err := db.QueryRowContext(ctx,
+		`SELECT snapshot_id FROM target_activation WHERE target_id = $1::UUID`,
+		targetID).Scan(&snapshotID)
+	if err != nil {
+		t.Fatalf("setup (lookup snapshot): %v", err)
+	}
+	return snapshotID
 }
 
 func tupleMatches(targetScenarioID, action string) kernel.AuthorityTuple {
@@ -243,6 +265,90 @@ func TestEA03_WrongTarget(t *testing.T) {
 	}
 	if rec.Called() {
 		t.Errorf("executor must NOT be called when DENIED")
+	}
+}
+
+// TestEA03b_ConfusedDeputy: T1→T2 confused-deputy attack.
+//
+// Creates two real, valid, approved targets T1/S1 and T2/S2 with identical
+// belief/action. Creates intent I1 via AuthorizeAndCreateIntent against T1/S1
+// (the real kernel creation path). Then calls ExecuteAction with target T2.
+//
+// T2 is itself a valid authority — authorization may succeed. But ClaimIntent
+// must reject I1 because I1 is bound to T1/S1, not T2/S2. This is the exact
+// authority binding regression for the confused-deputy class.
+func TestEA03b_ConfusedDeputy(t *testing.T) {
+	ctx := context.Background()
+	st := kernel.New(shared)
+	rec := executor.NewRecordingFunc("test_action", "should not run")
+	svc := newTestService(t, rec)
+
+	sid := testScenario(3003)
+	principalID := createPrincipal(t, ctx, st, "agent", "ea03b-issuer")
+	beliefID := createAndPromoteBelief(t, ctx, st, sid, "confused deputy belief")
+
+	// Create two approved targets with identical belief/action but different
+	// consequence parameters. Both are real, valid authorities.
+	t1 := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
+	t2 := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
+
+	// Create intent I1 via the real kernel creation path (AuthorizeAndCreateIntent).
+	// This binds I1 to T1/S1 atomically — the same path production uses.
+	tuple := kernel.AuthorityTuple{
+		PrincipalID:           principalID,
+		ResourceType:          "scenario",
+		ResourceID:            sid,
+		Scope:                 "belief:" + beliefID,
+		ActionNamespace:       "solvent",
+		ActionName:            "deploy",
+		ConsequenceType:       "execution",
+		ConsequenceParameters: testConsequenceParams(),
+	}
+	result, err := st.AuthorizeAndCreateIntent(ctx, t1, tuple, sid, beliefID, "deploy")
+	if err != nil {
+		t.Fatalf("AuthorizeAndCreateIntent(T1): %v", err)
+	}
+	if !result.Allowed {
+		t.Fatalf("expected T1 authorization to be allowed, got denied: %s", result.Reason)
+	}
+	if result.IntentState != "live" {
+		t.Fatalf("expected intent state live, got %q", result.IntentState)
+	}
+
+	// Read the intent ID created by AuthorizeAndCreateIntent.
+	var intentID string
+	err = shared.QueryRowContext(ctx,
+		"SELECT id FROM action_intent WHERE scenario_id=$1::UUID AND belief_id=$2::UUID AND action='deploy' AND target_id=$3::UUID AND state='live'",
+		sid, beliefID, t1).Scan(&intentID)
+	if err != nil {
+		t.Fatalf("read intent ID: %v", err)
+	}
+
+	// Execute against T2 — T2 is itself a valid, approved authority.
+	// Authorization for T2 may succeed, but ClaimIntent must reject I1
+	// because I1 is bound to T1/S1, not T2/S2.
+	execResult, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", t2, principalID,
+		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
+	if err != nil {
+		t.Fatalf("ExecuteAction: %v", err)
+	}
+
+	if execResult.Allowed {
+		t.Error("expected DENIED for confused-deputy T1→T2 substitution, got ALLOWED")
+	}
+	if rec.Called() {
+		t.Error("executor must NOT be called when ClaimIntent rejects")
+	}
+
+	// Verify intent I1 is still live.
+	var state string
+	err = shared.QueryRowContext(ctx,
+		"SELECT state FROM action_intent WHERE id=$1::UUID", intentID).Scan(&state)
+	if err != nil {
+		t.Fatalf("read intent state: %v", err)
+	}
+	if state != "live" {
+		t.Errorf("intent should remain live after rejected claim, got %q", state)
 	}
 }
 
@@ -533,7 +639,7 @@ func TestCB02_ProviderOutputNotAuthority(t *testing.T) {
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", "no-target", "no-actor",
 		intentID, map[string]interface{}{
 			"provider_output": "authorized by external system",
-			"provider信任状":  "trusted",
+			"provider信任状":     "trusted",
 		}, "execution", testConsequenceParams())
 	if err != nil {
 		t.Fatalf("ExecuteAction error: %v", err)
@@ -827,7 +933,8 @@ func TestP01_ValidAuthExecutes(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "p01-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for P01")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
-	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+	snap_targetID := lookupSnapshotID(t, ctx, shared, targetID)
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy", targetID, snap_targetID)
 
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalID,
 		intentID, map[string]interface{}{}, "execution", testConsequenceParams())
@@ -864,7 +971,8 @@ func TestExec11_ParameterSubstitutionAttack(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec11-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec11")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
-	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+	snap_targetID := lookupSnapshotID(t, ctx, shared, targetID)
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy", targetID, snap_targetID)
 
 	// Pass DIFFERENT consequence_parameters than what was approved.
 	attackerParams, _ := json.Marshal(map[string]string{
@@ -949,7 +1057,8 @@ func TestExec13_AuthorityRevokedMidFlight(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec13-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec13")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
-	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+	snap_targetID := lookupSnapshotID(t, ctx, shared, targetID)
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy", targetID, snap_targetID)
 
 	// Revoke authority.
 	if err := st.RevokeTarget(ctx, targetID, principalID, "mid-flight revocation"); err != nil {
@@ -983,7 +1092,8 @@ func TestExec14_CrossPrincipalExecution(t *testing.T) {
 	principalB := createPrincipal(t, ctx, st, "agent", "exec14-issuer-b")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec14")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalA, beliefID, "deploy")
-	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+	snap_targetID := lookupSnapshotID(t, ctx, shared, targetID)
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy", targetID, snap_targetID)
 
 	// Principal B tries to execute principal A's intent.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, principalB,
@@ -1012,7 +1122,8 @@ func TestExec15_WrongScenario(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec15-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec15")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
-	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+	snap_targetID := lookupSnapshotID(t, ctx, shared, targetID)
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy", targetID, snap_targetID)
 
 	// Use wrong scenario_id.
 	result, err := svc.ExecuteAction(ctx, wrongSid, beliefID, "deploy", targetID, principalID,
@@ -1041,7 +1152,8 @@ func TestExec16_WrongBelief(t *testing.T) {
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec16")
 	wrongBeliefID := createAndPromoteBelief(t, ctx, st, sid, "wrong belief for Exec16")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
-	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+	snap_targetID := lookupSnapshotID(t, ctx, shared, targetID)
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy", targetID, snap_targetID)
 
 	// Use wrong belief_id.
 	result, err := svc.ExecuteAction(ctx, sid, wrongBeliefID, "deploy", targetID, principalID,
@@ -1069,7 +1181,8 @@ func TestExec17_WrongAction(t *testing.T) {
 	principalID := createPrincipal(t, ctx, st, "agent", "exec17-issuer")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec17")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalID, beliefID, "deploy")
-	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+	snap_targetID := lookupSnapshotID(t, ctx, shared, targetID)
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy", targetID, snap_targetID)
 
 	// Use wrong action.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "rollback", targetID, principalID,
@@ -1126,7 +1239,8 @@ func TestExec19_WrongPrincipal(t *testing.T) {
 	wrongPrincipal := createPrincipal(t, ctx, st, "agent", "exec19-issuer-wrong")
 	beliefID := createAndPromoteBelief(t, ctx, st, sid, "belief for Exec19")
 	targetID := createApprovedTarget(t, ctx, st, sid, principalA, beliefID, "deploy")
-	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
+	snap_targetID := lookupSnapshotID(t, ctx, shared, targetID)
+	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy", targetID, snap_targetID)
 
 	// Use wrong principal.
 	result, err := svc.ExecuteAction(ctx, sid, beliefID, "deploy", targetID, wrongPrincipal,
@@ -1181,7 +1295,7 @@ func TestReconcile_CompletedAudit(t *testing.T) {
 	intentID := createLiveIntent(t, ctx, shared, sid, beliefID, "deploy")
 
 	// Claim the intent (live → executing).
-	if err := st.ClaimIntent(ctx, sid, intentID, beliefID, "deploy"); err != nil {
+	if err := st.ClaimIntent(ctx, sid, intentID, beliefID, "deploy", "", ""); err != nil {
 		t.Fatalf("setup claim: %v", err)
 	}
 

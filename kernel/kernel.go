@@ -142,8 +142,11 @@ func (s *Store) Promote(ctx context.Context, scenarioID, beliefID string) error 
 
 // createIntentWithinTx creates a live action intent within an existing transaction.
 // It is the single implementation of intent creation used by both IntentOnPromoted
-// (standalone) and AuthorizeAndCreateIntent (composite).
-func createIntentWithinTx(ctx context.Context, tx *sql.Tx, scenarioID, beliefID, action string) error {
+// (standalone, no authority binding) and AuthorizeAndCreateIntent (composite).
+//
+// targetID and snapshotID may be empty for the pre-approval IntentOnPromoted path.
+// When empty, the nullable columns are set to NULL.
+func createIntentWithinTx(ctx context.Context, tx *sql.Tx, scenarioID, beliefID, action, targetID, snapshotID string) error {
 	var exists bool
 	if err := tx.QueryRowContext(ctx,
 		`SELECT EXISTS(SELECT 1 FROM belief WHERE id = $1::UUID AND scenario_id = $2::UUID)`,
@@ -153,8 +156,21 @@ func createIntentWithinTx(ctx context.Context, tx *sql.Tx, scenarioID, beliefID,
 	if !exists {
 		return ErrBeliefNotFound
 	}
-	_, err := tx.ExecContext(ctx, sqlIntentOnPromoted, scenarioID, beliefID, action)
-	return wrapIf(sqlStateFKViolation, ErrActionOnUnpromoted, err)
+	var tid, sid interface{}
+	if targetID != "" {
+		tid = targetID
+	}
+	if snapshotID != "" {
+		sid = snapshotID
+	}
+	_, err := tx.ExecContext(ctx, sqlIntentOnPromoted, scenarioID, beliefID, action, tid, sid)
+	if err != nil {
+		if wrapped := wrapIf(sqlStateUniqueViolation, ErrDuplicateIntent, err); wrapped != err {
+			return wrapped
+		}
+		return wrapIf(sqlStateFKViolation, ErrActionOnUnpromoted, err)
+	}
+	return nil
 }
 
 // IntentOnPromoted records intent to act on a belief.
@@ -170,7 +186,7 @@ func createIntentWithinTx(ctx context.Context, tx *sql.Tx, scenarioID, beliefID,
 // on the intent tuple, which changes the frozen schema.
 func (s *Store) IntentOnPromoted(ctx context.Context, scenarioID, beliefID, action string) error {
 	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
-		return createIntentWithinTx(ctx, tx, scenarioID, beliefID, action)
+		return createIntentWithinTx(ctx, tx, scenarioID, beliefID, action, "", "")
 	})
 }
 

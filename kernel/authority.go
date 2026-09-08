@@ -32,6 +32,7 @@ type AuthorizeResult struct {
 	Reason                string
 	IntentState           string // populated by AuthorizeAndCreateIntent on success
 	ConsequenceParameters []byte // populated by Authorize — the snapshot's approved params
+	SnapshotID            string // populated by Authorize — the snapshot's UUID
 }
 
 // authorityTarget is the internal representation of an authority_target row.
@@ -373,11 +374,12 @@ func authorizeWithinTx(ctx context.Context, tx *sql.Tx, targetID string, tuple A
 		snapConsequenceType                               string
 		snapConsequenceParams                             []byte
 		justSetJSON                                       []byte
+		snapSnapshotID                                    string
 	)
 	if err := tx.QueryRowContext(ctx, sqlAuthorizeResolve, targetID).Scan(
 		&snapPrincipalID, &snapResourceType, &snapResourceID, &snapScope,
 		&snapActionNamespace, &snapActionName, &snapConsequenceType, &snapConsequenceParams,
-		&justSetJSON,
+		&justSetJSON, &snapSnapshotID,
 	); err != nil {
 		return AuthorizeResult{Allowed: false, Reason: "no activation or revocation exists"}, nil
 	}
@@ -428,7 +430,7 @@ func authorizeWithinTx(ctx context.Context, tx *sql.Tx, targetID string, tuple A
 		}
 	}
 
-	return AuthorizeResult{Allowed: true, Reason: "", ConsequenceParameters: snapConsequenceParams}, nil
+	return AuthorizeResult{Allowed: true, Reason: "", ConsequenceParameters: snapConsequenceParams, SnapshotID: snapSnapshotID}, nil
 }
 
 // Authorize is READ-ONLY. It verifies existing authority without creating
@@ -496,7 +498,7 @@ func (s *Store) AuthorizeAndCreateIntent(
 		}
 
 		// 2. Create intent (reuses createIntentWithinTx — one intent implementation).
-		if err := createIntentWithinTx(ctx, tx, scenarioID, beliefID, action); err != nil {
+		if err := createIntentWithinTx(ctx, tx, scenarioID, beliefID, action, targetID, result.SnapshotID); err != nil {
 			return err
 		}
 
@@ -526,14 +528,15 @@ func (s *Store) CompleteIntent(ctx context.Context, scenarioID, intentID string)
 // only one caller can successfully claim a given intent.
 //
 // Returns nil on success (state is now 'executing').
-// Returns ErrIntentNotLive if the intent is not in 'live' state.
+// Returns ErrIntentNotLive if the intent is not in 'live' state or the
+// tuple (belief_id, action, target_id, snapshot_id) does not match.
 //
 // This is the sole authoritative ownership gate for execution.
-// The CAS predicate (WHERE state = 'live') ensures at most one concurrent
-// claim succeeds per intent (CI-4).
-func (s *Store) ClaimIntent(ctx context.Context, scenarioID, intentID, beliefID, action string) error {
+// The CAS predicate (WHERE state = 'live' + exact tuple match) ensures at most
+// one concurrent claim succeeds per intent (CI-4).
+func (s *Store) ClaimIntent(ctx context.Context, scenarioID, intentID, beliefID, action, targetID, snapshotID string) error {
 	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, sqlClaimIntent, intentID, scenarioID, beliefID, action)
+		result, err := tx.ExecContext(ctx, sqlClaimIntent, intentID, scenarioID, beliefID, action, targetID, snapshotID)
 		if err != nil {
 			return err
 		}
@@ -542,7 +545,16 @@ func (s *Store) ClaimIntent(ctx context.Context, scenarioID, intentID, beliefID,
 			return err
 		}
 		if n == 0 {
-			return ErrIntentNotLive
+			// Advisory diagnostic: classify the failure for error reporting.
+			// The CAS is the authoritative decision; this read is advisory only.
+			var currentState sql.NullString
+			diagErr := tx.QueryRowContext(ctx,
+				`SELECT state FROM action_intent WHERE id = $1::UUID AND scenario_id = $2::UUID`,
+				intentID, scenarioID).Scan(&currentState)
+			if diagErr != nil || !currentState.Valid {
+				return ErrIntentNotLive // intent not found
+			}
+			return ErrIntentNotLive // exists but not live or tuple mismatch
 		}
 		return nil
 	})

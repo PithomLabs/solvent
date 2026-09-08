@@ -36,6 +36,7 @@ type AuthorizationDecision struct {
 	Action                string `json:"action"`
 	CheckedAt             time.Time `json:"checked_at"`
 	ConsequenceParameters []byte   `json:"-"` // snapshot's approved params from kernel
+	SnapshotID            string   `json:"-"` // snapshot's UUID from kernel
 }
 
 // ExecutionResult records the outcome of an action execution.
@@ -179,6 +180,7 @@ func (s *Service) PrepareForAction(
 	decision.Allowed = result.Allowed
 	decision.Reason = result.Reason
 	decision.ConsequenceParameters = result.ConsequenceParameters
+	decision.SnapshotID = result.SnapshotID
 
 	// 4. Log the authorization check.
 	logType := audit.ActivityAuthorizationGranted
@@ -306,7 +308,7 @@ func (s *Service) ExecuteAction(
 
 	// 6. ClaimIntent — atomic CAS live→executing. Sole authority gate (CI-4).
 	if intentID != "" {
-		if err := s.kern.ClaimIntent(ctx, scenarioID, intentID, beliefID, action); err != nil {
+		if err := s.kern.ClaimIntent(ctx, scenarioID, intentID, beliefID, action, targetID, decision.SnapshotID); err != nil {
 			result.Allowed = false
 			result.Error = fmt.Sprintf("claim intent: %v", err)
 			return result, nil

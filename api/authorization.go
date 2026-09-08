@@ -109,6 +109,7 @@ func (s *Server) handleAuthorizeAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Read the target's approved snapshot consequence_parameters.
+	// The kernel derives the authoritative snapshot_id independently via Authorize.
 	// Falls back to empty params when target is not activated — let authority deny.
 	var snapParams []byte
 	err := s.db.QueryRowContext(r.Context(), `
@@ -220,6 +221,7 @@ func (s *Server) handleExecuteAction(w http.ResponseWriter, r *http.Request) {
 	effectiveActor := principal.PrincipalID
 
 	// Read the target's approved snapshot consequence_parameters.
+	// The kernel derives the authoritative snapshot_id independently via Authorize.
 	// Falls back to empty params when target is not activated — let authority deny.
 	var snapParams []byte
 	err := s.db.QueryRowContext(r.Context(), `
@@ -245,15 +247,15 @@ func (s *Server) handleExecuteAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := ExecuteActionResult{
-		BeliefID:    req.BeliefID,
-		IntentID:    req.IntentID,
-		Action:      req.Action,
-		Allowed:     result.Allowed,
-		Success:     result.Success,
-		Output:      result.Output,
-		Error:       result.Error,
-		Reason:      result.Reason,
-		ExecutedAt:  result.ExecutedAt,
+		BeliefID:   req.BeliefID,
+		IntentID:   req.IntentID,
+		Action:     req.Action,
+		Allowed:    result.Allowed,
+		Success:    result.Success,
+		Output:     result.Output,
+		Error:      result.Error,
+		Reason:     result.Reason,
+		ExecutedAt: result.ExecutedAt,
 	}
 
 	if result.Allowed && result.Success {
