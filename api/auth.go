@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/PithomLabs/solvent/kernel"
 )
 
 // AuthenticatedPrincipal represents the trusted identity from the API key.
@@ -58,4 +62,29 @@ func AuthMiddleware(keyToPrincipal map[string]string, next http.Handler) http.Ha
 func AuthFromContext(ctx context.Context) *AuthenticatedPrincipal {
 	p, _ := ctx.Value(authKey).(*AuthenticatedPrincipal)
 	return p
+}
+
+// verifyPrincipalActive checks that the given principal exists in the principal
+// table and has not been revoked. Returns nil if active, kernel.ErrRevokedPrincipal
+// if revoked, or a generic error if not found.
+//
+// This is a best-effort liveness check, not a transactionally atomic authorization
+// gate. The kernel owns its internal crdb.ExecuteTx, so this check cannot be made
+// atomic with downstream kernel mutations. The residual TOCTOU race is documented
+// and accepted: revocation takes effect immediately for all new requests.
+func verifyPrincipalActive(ctx context.Context, db *sql.DB, principalID string) error {
+	var revokedAt sql.NullTime
+	err := db.QueryRowContext(ctx,
+		`SELECT revoked_at FROM principal WHERE principal_id = $1::UUID`,
+		principalID).Scan(&revokedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return kernel.ErrRevokedPrincipal
+	}
+	if err != nil {
+		return err
+	}
+	if revokedAt.Valid {
+		return kernel.ErrRevokedPrincipal
+	}
+	return nil
 }

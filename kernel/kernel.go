@@ -59,8 +59,10 @@ func New(db *sql.DB) *Store { return &Store{db: db} }
 // limitation. Fixing it requires a unique constraint on (scenario_id, claim),
 // which changes the frozen schema.
 func (s *Store) EnterBelief(ctx context.Context, scenarioID, claim string, ct ClaimType, initialDebt []string) (string, error) {
-	// Ensure non-nil for the driver: a nil slice would be sent as NULL,
-	// which violates the NOT NULL constraint on the debt column.
+	// Nil-to-empty guard: a nil slice would be sent as NULL by the pgx driver,
+	// violating the NOT NULL constraint on the debt column. An empty slice is
+	// a valid explicit choice meaning "no initial debt." All supported callers
+	// pass kernel.FullDebt explicitly; nil never occurs in practice.
 	debt := initialDebt
 	if debt == nil {
 		debt = []string{}

@@ -8,6 +8,10 @@ import (
 )
 
 // handleDischarge handles POST /v1/discharge.
+//
+// Access control: the authenticated principal must exist and not be revoked.
+// The discharged_by field is validated against the authenticated principal —
+// caller-supplied impersonation is rejected with 403 discharged_by_mismatch.
 func (s *Server) handleDischarge(w http.ResponseWriter, r *http.Request) {
 	var req DischargeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -36,6 +40,25 @@ func (s *Server) handleDischarge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Access control: verify authenticated principal is active.
+	principal := AuthFromContext(r.Context())
+	if principal == nil {
+		writeError(w, http.StatusUnauthorized, "missing_principal",
+			"No authenticated principal", nil)
+		return
+	}
+	if err := verifyPrincipalActive(r.Context(), s.db, principal.PrincipalID); err != nil {
+		writeKernelError(w, err, "")
+		return
+	}
+
+	// Reject impersonation: discharged_by must match the authenticated principal.
+	if req.DischargedBy != principal.PrincipalID {
+		writeError(w, http.StatusForbidden, "discharged_by_mismatch",
+			"discharged_by does not match authenticated principal", nil)
+		return
+	}
+
 	// Cross-scenario guard: belief must belong to the claimed scenario.
 	if _, err := view.GetSnapshot(r.Context(), s.db, req.ScenarioID, view.SnapshotOpts{BeliefID: req.BeliefID}); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "belief not found in scenario", nil)
@@ -43,7 +66,7 @@ func (s *Server) handleDischarge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.ledger.Discharge(r.Context(), req.ScenarioID, req.BeliefID, req.ObligationKey,
-		req.InstrumentRef, req.DischargedBy); err != nil {
+		req.InstrumentRef, principal.PrincipalID); err != nil {
 		writeKernelError(w, err, "")
 		return
 	}
@@ -52,6 +75,6 @@ func (s *Server) handleDischarge(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(DischargeResult{
 		BeliefID:      req.BeliefID,
 		ObligationKey: req.ObligationKey,
-		DischargedBy:  req.DischargedBy,
+		DischargedBy:  principal.PrincipalID,
 	})
 }
