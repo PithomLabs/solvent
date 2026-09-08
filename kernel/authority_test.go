@@ -776,7 +776,7 @@ func TestT23_RevivePromoteGap(t *testing.T) {
 
 	// Retract then re-promote.
 	_, _ = st.RetractCascade(ctx, sc, beliefID)
-	_ = st.Promote(ctx, beliefID)
+	_ = st.Promote(ctx, sc, beliefID)
 
 	// Authorize may now ALLOW again — this is the accepted v0 gap.
 	// v0 has no promotion_epoch, so the old justification appears valid.
@@ -805,8 +805,8 @@ func TestT24_DuplicateDischarge(t *testing.T) {
 	principal := createTestPrincipal(t, ctx, st, "agent", "test-issuer")
 	beliefID := mustPromoted(t, ctx, st, sc, "belief for duplicate discharge")
 
-	err := st.Discharge(ctx, beliefID, "obligation-1", "instrument-1", principal)
-	err2 := st.Discharge(ctx, beliefID, "obligation-1", "instrument-1", principal)
+	err := st.Discharge(ctx, sc, beliefID, "obligation-1", "instrument-1", principal)
+	err2 := st.Discharge(ctx, sc, beliefID, "obligation-1", "instrument-1", principal)
 
 	isDuplicate := errors.Is(err2, kernel.ErrDuplicateDischarge) || sqlStateOf(err2) == "23505"
 	ok := err == nil && err2 != nil && isDuplicate
@@ -831,8 +831,8 @@ func TestT25_CrossBeliefDischarge(t *testing.T) {
 	b1 := mustPromoted(t, ctx, st, sc, "belief A for cross-discharge")
 	b2 := mustPromoted(t, ctx, st, sc, "belief B for cross-discharge")
 
-	err1 := st.Discharge(ctx, b1, "obligation-1", "instrument-1", principal)
-	err2 := st.Discharge(ctx, b2, "obligation-1", "instrument-1", principal)
+	err1 := st.Discharge(ctx, sc, b1, "obligation-1", "instrument-1", principal)
+	err2 := st.Discharge(ctx, sc, b2, "obligation-1", "instrument-1", principal)
 
 	ok := err1 == nil && err2 == nil
 	rec.check(t, ok, Case{
@@ -886,7 +886,7 @@ func TestT27_RevokedPrincipalDischargeV0Behavior(t *testing.T) {
 
 	_ = st.RevokePrincipal(ctx, principal)
 
-	err := st.Discharge(ctx, beliefID, "obligation-1", "instrument-1", principal)
+	err := st.Discharge(ctx, sc, beliefID, "obligation-1", "instrument-1", principal)
 
 	// v0: revoked principal attribution is structurally valid (FK succeeds).
 	// Revocation enforcement for Discharge is a service-layer concern not yet
@@ -1129,7 +1129,7 @@ func TestTC4_DischargeXDischarge(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- st.Discharge(ctx, beliefID, "obligation-1", "instrument-1", principal)
+			errs <- st.Discharge(ctx, sc, beliefID, "obligation-1", "instrument-1", principal)
 		}()
 	}
 	wg.Wait()
@@ -1316,7 +1316,7 @@ func TestTC8_ConcurrentDischarge(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- st.Discharge(ctx, beliefID, "obligation-1", "instrument-1", principal)
+			errs <- st.Discharge(ctx, sc, beliefID, "obligation-1", "instrument-1", principal)
 		}()
 	}
 	wg.Wait()

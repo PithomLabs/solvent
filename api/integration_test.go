@@ -119,11 +119,11 @@ func TestIntegration_ConcurrentRevokeTarget(t *testing.T) {
 	// Retire debts, promote the belief, and attach a justification so the proposal is valid.
 	kern := kernel.New(db)
 	for _, item := range kernel.FullDebt {
-		if err := kern.RetireDebt(context.Background(), beliefID, item); err != nil {
+		if err := kern.RetireDebt(context.Background(), scenarioID, beliefID, item); err != nil {
 			t.Fatalf("retire debt %q: %v", item, err)
 		}
 	}
-	if err := kern.Promote(context.Background(), beliefID); err != nil {
+	if err := kern.Promote(context.Background(), scenarioID, beliefID); err != nil {
 		t.Fatalf("promote belief: %v", err)
 	}
 	if err := kern.AttachJustification(context.Background(), targetID, beliefID, "promoted", principalID); err != nil {
@@ -230,6 +230,7 @@ func TestIntegration_DuplicateDischargePrevention(t *testing.T) {
 
 	// First discharge.
 	body := map[string]interface{}{
+		"scenario_id":   scenarioID,
 		"belief_id":      beliefID,
 		"obligation_key": "test-obligation",
 		"instrument_ref": "ref-001",
@@ -248,4 +249,134 @@ func TestIntegration_DuplicateDischargePrevention(t *testing.T) {
 		t.Errorf("duplicate discharge: expected 409, got %d", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+// --- Cross-scenario endpoint regression tests (Plan 8.5 §4a) ---
+
+func TestCS_RetireDebt_WrongScenario(t *testing.T) {
+	db := testDB(t)
+	if db == nil {
+		return
+	}
+	defer db.Close()
+
+	ts := newTestServer(t, db)
+	defer ts.Close()
+
+	scenarioA := createTestScenario(t)
+	scenarioB := createTestScenario(t)
+	beliefID := createTestBelief(t, db, scenarioA)
+
+	// Read debt before.
+	var debtBefore string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtBefore)
+
+	// Retire with wrong scenario → 404. scenario_id is a query parameter.
+	body := map[string]interface{}{
+		"debt_item": "needBlastRadius",
+	}
+	resp := doRequest(t, ts, "POST",
+		"/v1/beliefs/"+beliefID+"/debt/retire?scenario_id="+scenarioB, body)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("wrong scenario retire: expected 404, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Verify zero mutation.
+	var debtAfter string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtAfter)
+	if debtBefore != debtAfter {
+		t.Errorf("debt mutated: before=%q, after=%q", debtBefore, debtAfter)
+	}
+}
+
+func TestCS_Promote_WrongScenario(t *testing.T) {
+	db := testDB(t)
+	if db == nil {
+		return
+	}
+	defer db.Close()
+
+	ts := newTestServer(t, db)
+	defer ts.Close()
+
+	scenarioA := createTestScenario(t)
+	scenarioB := createTestScenario(t)
+	beliefID := createTestBelief(t, db, scenarioA)
+
+	// Read status before.
+	var statusBefore string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT status FROM belief WHERE id=$1::UUID`, beliefID).Scan(&statusBefore)
+
+	// Promote with wrong scenario → 404. scenario_id is a query parameter.
+	resp := doRequest(t, ts, "POST",
+		"/v1/beliefs/"+beliefID+"/promote?scenario_id="+scenarioB, nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("wrong scenario promote: expected 404, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Verify zero mutation.
+	var statusAfter string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT status FROM belief WHERE id=$1::UUID`, beliefID).Scan(&statusAfter)
+	if statusBefore != statusAfter {
+		t.Errorf("status mutated: before=%q, after=%q", statusBefore, statusAfter)
+	}
+}
+
+func TestCS_Discharge_WrongScenario(t *testing.T) {
+	db := testDB(t)
+	if db == nil {
+		return
+	}
+	defer db.Close()
+
+	ts := newTestServer(t, db)
+	defer ts.Close()
+
+	scenarioA := createTestScenario(t)
+	scenarioB := createTestScenario(t)
+	beliefID := createTestBelief(t, db, scenarioA)
+	principalID := createTestPrincipal(t, db)
+
+	// Read state before.
+	var countBefore int
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM debt_discharge WHERE belief_id=$1::UUID`, beliefID).Scan(&countBefore)
+	var debtBefore string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtBefore)
+
+	// Discharge with wrong scenario → 404.
+	body := map[string]interface{}{
+		"scenario_id":   scenarioB,
+		"belief_id":     beliefID,
+		"obligation_key": "cs-obligation",
+		"instrument_ref": "cs-instrument",
+		"discharged_by":  principalID,
+	}
+	resp := doRequest(t, ts, "POST", "/v1/discharge", body)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("wrong scenario discharge: expected 404, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Verify zero mutation.
+	var countAfter int
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM debt_discharge WHERE belief_id=$1::UUID`, beliefID).Scan(&countAfter)
+	var debtAfter string
+	_ = db.QueryRowContext(context.Background(),
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&debtAfter)
+	if countBefore != countAfter {
+		t.Errorf("discharge rows mutated: before=%d, after=%d", countBefore, countAfter)
+	}
+	if debtBefore != debtAfter {
+		t.Errorf("debt mutated: before=%q, after=%q", debtBefore, debtAfter)
+	}
+	_ = scenarioA // unused but ensures both scenarios are created
 }

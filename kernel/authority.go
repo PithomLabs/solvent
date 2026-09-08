@@ -531,9 +531,9 @@ func (s *Store) CompleteIntent(ctx context.Context, scenarioID, intentID string)
 // This is the sole authoritative ownership gate for execution.
 // The CAS predicate (WHERE state = 'live') ensures at most one concurrent
 // claim succeeds per intent (CI-4).
-func (s *Store) ClaimIntent(ctx context.Context, scenarioID, intentID string) error {
+func (s *Store) ClaimIntent(ctx context.Context, scenarioID, intentID, beliefID, action string) error {
 	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, sqlClaimIntent, intentID, scenarioID)
+		result, err := tx.ExecContext(ctx, sqlClaimIntent, intentID, scenarioID, beliefID, action)
 		if err != nil {
 			return err
 		}
@@ -641,13 +641,32 @@ func (s *Store) RevokeTarget(ctx context.Context, targetID, revokedBy, reason st
 // Discharge records a debt discharge and retires the debt item from the belief
 // in one transaction. The UNIQUE(belief_id, obligation_key, instrument_ref)
 // constraint provides per-belief replay protection.
-func (s *Store) Discharge(ctx context.Context, beliefID, obligationKey, instrumentRef, dischargedBy string) error {
+//
+// Returns ErrBeliefNotFound if the belief does not exist in the given scenario.
+// The existence check, INSERT, and UPDATE are atomic within one transaction: a
+// cross-scenario attempt produces zero durable effects (no discharge row, no
+// debt mutation).
+func (s *Store) Discharge(ctx context.Context, scenarioID, beliefID, obligationKey, instrumentRef, dischargedBy string) error {
 	return crdb.ExecuteTx(ctx, s.db, nil, func(tx *sql.Tx) error {
+		// Verify belief exists in this scenario before any writes.
+		var exists bool
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM belief WHERE id = $1::UUID AND scenario_id = $2::UUID)`,
+			beliefID, scenarioID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrBeliefNotFound
+		}
+
+		// Write 1: INSERT discharge record.
 		if _, err := tx.ExecContext(ctx, sqlDischargeInsert,
 			beliefID, obligationKey, instrumentRef, dischargedBy); err != nil {
 			return wrapIf(sqlStateUniqueViolation, ErrDuplicateDischarge, err)
 		}
-		_, err := tx.ExecContext(ctx, sqlDischargeRetireDebt, beliefID, obligationKey)
+
+		// Write 2: UPDATE belief.debt (scenario-bound as defense-in-depth).
+		_, err := tx.ExecContext(ctx, sqlDischargeRetireDebt, beliefID, obligationKey, scenarioID)
 		return err
 	})
 }

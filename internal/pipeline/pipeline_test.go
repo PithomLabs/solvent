@@ -398,11 +398,11 @@ func TestEndToEnd_ProposeIfNew_Idempotent(t *testing.T) {
 		t.Fatalf("EnsureBelief: %v", err)
 	}
 	for _, item := range kernel.FullDebt {
-		if err := st.RetireDebt(ctx, beliefID, item); err != nil {
+		if err := st.RetireDebt(ctx, sc, beliefID, item); err != nil {
 			t.Fatalf("RetireDebt(%s): %v", item, err)
 		}
 	}
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, sc, beliefID); err != nil {
 		t.Fatalf("Promote: %v", err)
 	}
 

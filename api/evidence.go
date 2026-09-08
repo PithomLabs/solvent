@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/PithomLabs/solvent/internal/view"
 )
 
 // handleAddEvidence handles POST /v1/evidence.
@@ -29,6 +31,12 @@ func (s *Server) handleAddEvidence(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateNonEmpty(req.ContentSHA256, "content_sha256"); err != nil {
 		writeValidationError(w, "content_sha256", err.Error(), "")
+		return
+	}
+
+	// Cross-scenario guard: belief must belong to the claimed scenario.
+	if _, err := view.GetSnapshot(r.Context(), s.db, req.ScenarioID, view.SnapshotOpts{BeliefID: req.BeliefID}); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "belief not found in scenario", nil)
 		return
 	}
 

@@ -78,14 +78,14 @@ func Process(ctx context.Context, db *sql.DB, scenarioID string, b derive.Derive
 	for _, e := range b.SupportingEvidence {
 		items := DebtItemsForEvidence(e.SourceType, e.Assertion)
 		for _, item := range items {
-			if err := st.RetireDebt(ctx, beliefID, item); err != nil {
+			if err := st.RetireDebt(ctx, scenarioID, beliefID, item); err != nil {
 				return err
 			}
 		}
 	}
 
 	// Step 4: Promote (may fail with ErrPromotionBlocked — acceptable).
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

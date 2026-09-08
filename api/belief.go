@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/PithomLabs/solvent/internal/view"
 	"github.com/PithomLabs/solvent/kernel"
 )
 
@@ -97,8 +98,13 @@ func (s *Server) handleListBeliefs(w http.ResponseWriter, r *http.Request) {
 // handleRetireDebt handles POST /v1/beliefs/{id}/debt/retire.
 func (s *Server) handleRetireDebt(w http.ResponseWriter, r *http.Request) {
 	beliefID := r.PathValue("id")
+	scenarioID := r.URL.Query().Get("scenario_id")
 	if err := validateUUID(beliefID, "id"); err != nil {
 		writeValidationError(w, "id", err.Error(), "")
+		return
+	}
+	if err := validateUUID(scenarioID, "scenario_id"); err != nil {
+		writeValidationError(w, "scenario_id", err.Error(), "")
 		return
 	}
 
@@ -112,13 +118,18 @@ func (s *Server) handleRetireDebt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.ledger.RetireDebt(r.Context(), beliefID, req.DebtItem); err != nil {
+	// Cross-scenario guard: belief must belong to the claimed scenario.
+	if _, err := view.GetSnapshot(r.Context(), s.db, scenarioID, view.SnapshotOpts{BeliefID: beliefID}); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "belief not found in scenario", nil)
+		return
+	}
+
+	if err := s.ledger.RetireDebt(r.Context(), scenarioID, beliefID, req.DebtItem); err != nil {
 		writeKernelError(w, err, "")
 		return
 	}
 
 	// Read updated belief.
-	scenarioID := r.URL.Query().Get("scenario_id")
 	b, err := ReadBelief(r.Context(), s.db, scenarioID, beliefID)
 	if err != nil {
 		writeKernelError(w, err, "")
@@ -134,13 +145,23 @@ func (s *Server) handleRetireDebt(w http.ResponseWriter, r *http.Request) {
 // handlePromoteBelief handles POST /v1/beliefs/{id}/promote.
 func (s *Server) handlePromoteBelief(w http.ResponseWriter, r *http.Request) {
 	beliefID := r.PathValue("id")
+	scenarioID := r.URL.Query().Get("scenario_id")
 	if err := validateUUID(beliefID, "id"); err != nil {
 		writeValidationError(w, "id", err.Error(), "")
 		return
 	}
-	scenarioID := r.URL.Query().Get("scenario_id")
+	if err := validateUUID(scenarioID, "scenario_id"); err != nil {
+		writeValidationError(w, "scenario_id", err.Error(), "")
+		return
+	}
 
-	err := s.ledger.Promote(r.Context(), beliefID)
+	// Cross-scenario guard: belief must belong to the claimed scenario.
+	if _, err := view.GetSnapshot(r.Context(), s.db, scenarioID, view.SnapshotOpts{BeliefID: beliefID}); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "belief not found in scenario", nil)
+		return
+	}
+
+	err := s.ledger.Promote(r.Context(), scenarioID, beliefID)
 	if err != nil {
 		if isPromotionBlocked(err) {
 			// Verdict: HTTP 200 with refusal body.

@@ -236,6 +236,11 @@ func (s *Service) ExecuteAction(
 		ExecutedAt: time.Now(),
 	}
 
+	// 0. Assert mandatory precondition: intentID is required.
+	if intentID == "" {
+		return nil, errors.New("intentID is required for ExecuteAction")
+	}
+
 	// 1. PrepareForAction — re-reads current state, calls kernel.Authorize.
 	decision, err := s.PrepareForAction(ctx, scenarioID, beliefID, action, targetID, actorID, consequenceType, consequenceParameters)
 	if err != nil {
@@ -301,7 +306,7 @@ func (s *Service) ExecuteAction(
 
 	// 6. ClaimIntent — atomic CAS live→executing. Sole authority gate (CI-4).
 	if intentID != "" {
-		if err := s.kern.ClaimIntent(ctx, scenarioID, intentID); err != nil {
+		if err := s.kern.ClaimIntent(ctx, scenarioID, intentID, beliefID, action); err != nil {
 			result.Allowed = false
 			result.Error = fmt.Sprintf("claim intent: %v", err)
 			return result, nil
@@ -444,7 +449,36 @@ func (s *Service) ExecuteAction(
 //
 // Reconciliation is an operator execution-control operation, not a public API.
 func (s *Service) ReconcileIntent(ctx context.Context, scenarioID, intentID string, outcome IntentOutcome, operatorID string) error {
-	// Log reconciliation before dispatching to kernel.
+	// Dispatch to kernel first. Audit logging occurs AFTER the state transition
+	// to prevent false-positive audit records on transient failures.
+	var err error
+	switch outcome {
+	case IntentOutcomeCompleted:
+		err = s.kern.CompleteIntent(ctx, scenarioID, intentID)
+	case IntentOutcomeFailed:
+		err = s.kern.RollbackClaim(ctx, scenarioID, intentID)
+	case IntentOutcomeCancelled:
+		err = s.kern.CancelIntent(ctx, scenarioID, intentID)
+	default:
+		return fmt.Errorf("unknown outcome: %d", outcome)
+	}
+
+	if err != nil {
+		// Log truthful failure. The original kernel error must not be obscured.
+		s.audit.Log(ctx, &audit.ActivityEntry{
+			ScenarioID: scenarioID,
+			Type:       audit.ActivityReconciliationFailed,
+			ActorID:    operatorID,
+			SubjectID:  intentID,
+			Details: map[string]interface{}{
+				"intent_id": intentID,
+				"outcome":   outcome.String(),
+				"error":     err.Error(),
+			},
+		})
+		return err
+	}
+
 	s.audit.Log(ctx, &audit.ActivityEntry{
 		ScenarioID: scenarioID,
 		Type:       audit.ActivityReconciliationCompleted,
@@ -455,17 +489,7 @@ func (s *Service) ReconcileIntent(ctx context.Context, scenarioID, intentID stri
 			"outcome":   outcome.String(),
 		},
 	})
-
-	switch outcome {
-	case IntentOutcomeCompleted:
-		return s.kern.CompleteIntent(ctx, scenarioID, intentID)
-	case IntentOutcomeFailed:
-		return s.kern.RollbackClaim(ctx, scenarioID, intentID)
-	case IntentOutcomeCancelled:
-		return s.kern.CancelIntent(ctx, scenarioID, intentID)
-	default:
-		return fmt.Errorf("unknown outcome: %d", outcome)
-	}
+	return nil
 }
 
 // String returns the human-readable name for an IntentOutcome.

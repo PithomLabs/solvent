@@ -85,9 +85,9 @@ func main() {
 		os.Exit(1)
 	}
 	for _, item := range kernel.FullDebt {
-		_ = st.RetireDebt(ctx, beliefID, item)
+		_ = st.RetireDebt(ctx, sid, beliefID, item)
 	}
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, sid, beliefID); err != nil {
 		fmt.Fprintf(os.Stderr, "promote belief: %v\n", err)
 		os.Exit(1)
 	}

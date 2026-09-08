@@ -222,6 +222,7 @@ type ExecuteActionResult struct {
 
 // DischargeRequest is the request body for POST /v1/discharge.
 type DischargeRequest struct {
+	ScenarioID    string `json:"scenario_id"`
 	BeliefID      string `json:"belief_id"`
 	ObligationKey string `json:"obligation_key"`
 	InstrumentRef string `json:"instrument_ref"`

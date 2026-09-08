@@ -108,7 +108,7 @@ func (s *Server) dischargeFromCitation(ctx context.Context, scenarioID, beliefID
 		return v
 	}
 
-	if err := s.kern.RetireDebt(ctx, beliefID, item); err != nil {
+	if err := s.kern.RetireDebt(ctx, scenarioID, beliefID, item); err != nil {
 		return s.refuse(ctx, scenarioID, StmtDischarge, err, "")
 	}
 	return Verdict{OK: true, Statement: StmtDischarge, Detail: item + " discharged from citation"}
@@ -142,7 +142,7 @@ func (s *Server) dischargeFromArtifact(ctx context.Context, scenarioID, beliefID
 		"operator_asserted", ref, hex.EncodeToString(sum[:])); err != nil {
 		return s.refuse(ctx, scenarioID, StmtDischarge, err, "")
 	}
-	if err := s.kern.RetireDebt(ctx, beliefID, item); err != nil {
+	if err := s.kern.RetireDebt(ctx, scenarioID, beliefID, item); err != nil {
 		return s.refuse(ctx, scenarioID, StmtDischarge, err, "")
 	}
 	return Verdict{OK: true, Statement: StmtDischarge, Detail: item + " discharged"}

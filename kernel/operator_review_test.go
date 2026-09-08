@@ -23,13 +23,13 @@ func TestOperatorReview_PromoteWithoutAction(t *testing.T) {
 
 	// Retire all 6 debts.
 	for _, item := range kernel.FullDebt {
-		if err := st.RetireDebt(ctx, beliefID, item); err != nil {
+		if err := st.RetireDebt(ctx, scenarioID, beliefID, item); err != nil {
 			t.Fatalf("retire %s: %v", item, err)
 		}
 	}
 
 	// Promote.
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {
 		t.Fatalf("promote: %v", err)
 	}
 
@@ -63,13 +63,13 @@ func TestOperatorReview_PromoteWithAction(t *testing.T) {
 
 	// Retire all 6 debts.
 	for _, item := range kernel.FullDebt {
-		if err := st.RetireDebt(ctx, beliefID, item); err != nil {
+		if err := st.RetireDebt(ctx, scenarioID, beliefID, item); err != nil {
 			t.Fatalf("retire %s: %v", item, err)
 		}
 	}
 
 	// Promote.
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {
 		t.Fatalf("promote: %v", err)
 	}
 
@@ -155,12 +155,12 @@ func TestOperatorReview_FailedPromotion(t *testing.T) {
 	}
 
 	// Retire only 1 of 6 debts.
-	if err := st.RetireDebt(ctx, beliefID, "needProvenanceCheck"); err != nil {
+	if err := st.RetireDebt(ctx, scenarioID, beliefID, "needProvenanceCheck"); err != nil {
 		t.Fatalf("retire: %v", err)
 	}
 
 	// Promote should fail (5 debts remain).
-	err = st.Promote(ctx, beliefID)
+	err = st.Promote(ctx, scenarioID, beliefID)
 	if err == nil {
 		t.Fatal("expected promotion to fail, got nil")
 	}

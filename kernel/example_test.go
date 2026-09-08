@@ -49,7 +49,7 @@ func Example_lifecycle() {
 
 	// --- the debt gate (I-1) --------------------------------------------------
 	// Refused by CHECK promoted_is_debt_free. No debt is inspected in Go.
-	err = st.Promote(ctx, beliefID)
+	err = st.Promote(ctx, exampleScenario, beliefID)
 	fmt.Printf("promote:   %s sqlstate=%s constraint=%s\n",
 		exampleSentinel(err, kernel.ErrPromotionBlocked, "ErrPromotionBlocked"),
 		sqlStateOf(err), constraintOf(err))
@@ -66,12 +66,12 @@ func Example_lifecycle() {
 	// Review discharges each obligation. Nothing about the claim changed; only its
 	// epistemic standing did.
 	for _, item := range kernel.FullDebt {
-		if err := st.RetireDebt(ctx, beliefID, item); err != nil {
+		if err := st.RetireDebt(ctx, exampleScenario, beliefID, item); err != nil {
 			fmt.Println("RetireDebt:", err)
 			return
 		}
 	}
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, exampleScenario, beliefID); err != nil {
 		fmt.Println("Promote:", err)
 		return
 	}

@@ -3,6 +3,8 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/PithomLabs/solvent/internal/view"
 )
 
 // handleDischarge handles POST /v1/discharge.
@@ -13,6 +15,10 @@ func (s *Server) handleDischarge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateUUID(req.ScenarioID, "scenario_id"); err != nil {
+		writeValidationError(w, "scenario_id", err.Error(), "")
+		return
+	}
 	if err := validateUUID(req.BeliefID, "belief_id"); err != nil {
 		writeValidationError(w, "belief_id", err.Error(), "")
 		return
@@ -30,7 +36,13 @@ func (s *Server) handleDischarge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.ledger.Discharge(r.Context(), req.BeliefID, req.ObligationKey,
+	// Cross-scenario guard: belief must belong to the claimed scenario.
+	if _, err := view.GetSnapshot(r.Context(), s.db, req.ScenarioID, view.SnapshotOpts{BeliefID: req.BeliefID}); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "belief not found in scenario", nil)
+		return
+	}
+
+	if err := s.ledger.Discharge(r.Context(), req.ScenarioID, req.BeliefID, req.ObligationKey,
 		req.InstrumentRef, req.DischargedBy); err != nil {
 		writeKernelError(w, err, "")
 		return

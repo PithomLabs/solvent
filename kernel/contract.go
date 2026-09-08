@@ -16,8 +16,8 @@ import (
 type Contract interface {
 	EnterBelief(context.Context, string, string, ClaimType) (string, error)
 	AddEvidence(context.Context, string, string, string, string, string) error
-	RetireDebt(context.Context, string, string) error
-	Promote(context.Context, string) error
+	RetireDebt(context.Context, string, string, string) error
+	Promote(context.Context, string, string) error
 	IntentOnPromoted(context.Context, string, string, string) error
 	RetractCascade(context.Context, string, string) (int, error)
 	AuditLiveOnNonPromoted(context.Context, string) (int, error)
@@ -33,9 +33,9 @@ type Contract interface {
 	Authorize(context.Context, string, AuthorityTuple) (AuthorizeResult, error)
 	AuthorizeAndCreateIntent(context.Context, string, AuthorityTuple, string, string, string) (AuthorizeResult, error)
 	RevokeTarget(context.Context, string, string, string) error
-	Discharge(context.Context, string, string, string, string) error
+	Discharge(context.Context, string, string, string, string, string) error
 	CompleteIntent(context.Context, string, string) error
-	ClaimIntent(context.Context, string, string) error
+	ClaimIntent(context.Context, string, string, string, string) error
 	RollbackClaim(context.Context, string, string) error
 	CancelIntent(context.Context, string, string) error
 }

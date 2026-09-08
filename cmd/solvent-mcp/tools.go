@@ -140,7 +140,7 @@ func handleSolventRetireDebt(ctx context.Context, db *sql.DB, args map[string]in
 	}
 
 	st := kernel.New(db)
-	if err := st.RetireDebt(ctx, beliefID, item); err != nil {
+	if err := st.RetireDebt(ctx, scenarioID, beliefID, item); err != nil {
 		return errorResult(err), nil
 	}
 
@@ -186,7 +186,7 @@ func handleSolventPromote(ctx context.Context, db *sql.DB, args map[string]inter
 	}
 
 	st := kernel.New(db)
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {
 		return envelopeErrorResult(ctx, db, toolError(err), scenarioID), nil
 	}
 
@@ -613,13 +613,25 @@ func handleSolventDischarge(ctx context.Context, db *sql.DB, args map[string]int
 	obligationKey, _ := args["obligation_key"].(string)
 	instrumentRef, _ := args["instrument_ref"].(string)
 	dischargedBy, _ := args["discharged_by"].(string)
+	scenario, _ := args["scenario"].(string)
 
 	if beliefID == "" || obligationKey == "" || instrumentRef == "" || dischargedBy == "" {
 		return errorResult(fmt.Errorf("all fields are required (belief_id, obligation_key, instrument_ref, discharged_by)")), nil
 	}
 
+	scenarioID, ok := lookupScenario(scenario)
+	if !ok {
+		return errorResult(fmt.Errorf("unknown scenario: %q (valid: %s)", scenario, strings.Join(scenarioNames(), ", "))), nil
+	}
+
+	// Cross-scenario guard: verify the belief belongs to this scenario.
+	snap, err := view.GetSnapshot(ctx, db, scenarioID, view.SnapshotOpts{BeliefID: beliefID})
+	if err != nil || len(snap.Beliefs) != 1 || snap.Beliefs[0].ID != beliefID {
+		return errorResult(fmt.Errorf("belief %s not found in scenario %s", beliefID, scenario)), nil
+	}
+
 	st := kernel.New(db)
-	if err := st.Discharge(ctx, beliefID, obligationKey, instrumentRef, dischargedBy); err != nil {
+	if err := st.Discharge(ctx, scenarioID, beliefID, obligationKey, instrumentRef, dischargedBy); err != nil {
 		return toolErrorResult(err), nil
 	}
 

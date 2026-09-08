@@ -60,13 +60,13 @@ func (s *Service) AddEvidence(ctx context.Context, scenarioID, beliefID, provena
 }
 
 // RetireDebt delegates to kernel.RetireDebt.
-func (s *Service) RetireDebt(ctx context.Context, beliefID, item string) error {
-	return s.kern.RetireDebt(ctx, beliefID, item)
+func (s *Service) RetireDebt(ctx context.Context, scenarioID, beliefID, item string) error {
+	return s.kern.RetireDebt(ctx, scenarioID, beliefID, item)
 }
 
 // Promote delegates to kernel.Promote.
-func (s *Service) Promote(ctx context.Context, beliefID string) error {
-	return s.kern.Promote(ctx, beliefID)
+func (s *Service) Promote(ctx context.Context, scenarioID, beliefID string) error {
+	return s.kern.Promote(ctx, scenarioID, beliefID)
 }
 
 // RetractCascade delegates to kernel.RetractCascade.
@@ -110,8 +110,8 @@ func (s *Service) RevokeTarget(ctx context.Context, targetID, revokedBy, reason 
 }
 
 // Discharge delegates to kernel.Discharge.
-func (s *Service) Discharge(ctx context.Context, beliefID, obligationKey, instrumentRef, dischargedBy string) error {
-	return s.kern.Discharge(ctx, beliefID, obligationKey, instrumentRef, dischargedBy)
+func (s *Service) Discharge(ctx context.Context, scenarioID, beliefID, obligationKey, instrumentRef, dischargedBy string) error {
+	return s.kern.Discharge(ctx, scenarioID, beliefID, obligationKey, instrumentRef, dischargedBy)
 }
 
 // --- Read-only operations ---

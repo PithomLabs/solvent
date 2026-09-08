@@ -163,13 +163,13 @@ func runReviewMode(ctx context.Context, st *kernel.Store, db *sql.DB, scenarioID
 	}
 
 	for _, item := range debts {
-		if err := st.RetireDebt(ctx, beliefID, item); err != nil {
+		if err := st.RetireDebt(ctx, scenarioID, beliefID, item); err != nil {
 			fail(fmt.Sprintf("retire %s: %v", item, err))
 		}
 		fmt.Printf("retired: %s\n", item)
 	}
 
-	if err := st.Promote(ctx, beliefID); err != nil {
+	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {
 		fail(fmt.Sprintf("promote: %v", err))
 	}
 	fmt.Println("promoted: ok")
