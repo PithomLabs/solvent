@@ -5,6 +5,8 @@ action is allowed.
 
 The core idea: As AI agents accelerate in their capabilities, we need the equivalent of deceleration: a checkpoint that stops them from executing consequential actions without authorization.
 
+![Logo](solvent_dark.png)
+
 **Live demo: https://byb43s8nh2.us-west-2.awsapprunner.com/demo**  
 **Demo video: https://www.youtube.com/watch?v=EtFUaCnbHPA**
 
