@@ -10,10 +10,10 @@ import (
 
 	"github.com/PithomLabs/solvent/internal/corpus"
 	"github.com/PithomLabs/solvent/internal/wizard"
-	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/internal/belief"
 )
 
-// artifacts for the four operator checks, in kernel.FullDebt order.
+// artifacts for the four operator checks, in belief.WizardDebt() order.
 var operatorArtifacts = map[string]string{
 	"needBlastRadius":     "apiserver, compactor, raft",
 	"needRollbackPlan":    "https://runbooks.example.invalid/etcd-rollback.md",
@@ -248,7 +248,7 @@ func TestW07_FullDischargeThenPromoteThenAuthorize(t *testing.T) {
 
 	// Screen 2: a citation, then all six checks.
 	selectHits(t, s, bid, "data inconsistency after upgrade", 2)
-	for _, item := range kernel.FullDebt {
+	for _, item := range belief.WizardDebt() {
 		v := s.Discharge(ctx, sid, bid, item, operatorArtifacts[item])
 		if !v.OK {
 			t.Fatalf("discharge %s refused: %+v", item, v)
@@ -486,7 +486,7 @@ func TestW12_PromoteAndAuthorizeHaveNoScreenDependence(t *testing.T) {
 
 	// Discharge everything, which is the only thing that changed.
 	selectHits(t, s, bid, "same-sql check", 2)
-	for _, item := range kernel.FullDebt {
+	for _, item := range belief.WizardDebt() {
 		if v := s.Discharge(ctx, sid, bid, item, operatorArtifacts[item]); !v.OK {
 			t.Fatalf("discharge %s: %+v", item, v)
 		}
@@ -591,7 +591,7 @@ func TestW14_StateIsDerivedNotRemembered(t *testing.T) {
 		{"after refusal", func() { s.Promote(ctx, sid, bid) }, wizard.ScreenDischarge},
 		{"after discharge", func() {
 			selectHits(t, s, bid, "reload check", 2)
-			for _, item := range kernel.FullDebt {
+			for _, item := range belief.WizardDebt() {
 				s.Discharge(ctx, sid, bid, item, operatorArtifacts[item])
 			}
 		}, wizard.ScreenDischarge},

@@ -24,6 +24,7 @@ var schemaPaths = []string{
 	"../../db/007_service_tables.sql",
 	"../../db/008_executing_state.sql",
 	"../../db/009_exact_authority_binding.sql",
+	"../../db/010_debt_opaque.sql",
 }
 
 var (
@@ -70,11 +71,11 @@ func scenario(n int) string {
 func createPromotedBelief(ctx context.Context, t *testing.T, sc, claim string) string {
 	t.Helper()
 	st := kernel.New(shared)
-	id, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived, kernel.FullDebt)
+	id, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("EnsureBelief: %v", err)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		if err := st.RetireDebt(ctx, sc, id, item); err != nil {
 			t.Fatalf("RetireDebt(%s): %v", item, err)
 		}
@@ -108,7 +109,7 @@ func TestPropose_OnUnpromotedBelief(t *testing.T) {
 	sc := scenario(2)
 	st := kernel.New(shared)
 
-	beliefID, err := st.EnsureBelief(ctx, sc, "unpromoted belief", kernel.Derived, kernel.FullDebt)
+	beliefID, err := st.EnsureBelief(ctx, sc, "unpromoted belief", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("EnsureBelief: %v", err)
 	}

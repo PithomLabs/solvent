@@ -28,10 +28,10 @@ func Example_lifecycle() {
 	st := kernel.New(shared)
 
 	// --- evidence → belief ----------------------------------------------------
-	// A claim enters free: status 'entered', carrying the full starting debt.
+	// A claim enters free: status 'entered', carrying the caller-supplied starting debt.
 	// Ideas are never gated at the door; only actions are.
 	beliefID, err := st.EnterBelief(ctx, exampleScenario,
-		"etcd v3.5.0 is approved for production deployment", kernel.Postulated, kernel.FullDebt)
+		"etcd v3.5.0 is approved for production deployment", kernel.Postulated, []string{"testDebt"})
 	if err != nil {
 		fmt.Println("EnterBelief:", err)
 		return
@@ -65,7 +65,7 @@ func Example_lifecycle() {
 	// --- debt → promotion -----------------------------------------------------
 	// Review discharges each obligation. Nothing about the claim changed; only its
 	// epistemic standing did.
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		if err := st.RetireDebt(ctx, exampleScenario, beliefID, item); err != nil {
 			fmt.Println("RetireDebt:", err)
 			return
@@ -108,7 +108,7 @@ func Example_lifecycle() {
 	fmt.Printf("audit:     live_on_nonpromoted=%d\n", n)
 
 	// Output:
-	// entered:   status=entered debt=6 evidence=1
+	// entered:   status=entered debt=1 evidence=1
 	// promote:   ErrPromotionBlocked sqlstate=23514 constraint=promoted_is_debt_free
 	// intent:    ErrActionOnUnpromoted sqlstate=23503 constraint=gate
 	// promoted:  status=promoted debt=0

@@ -38,6 +38,7 @@ import (
 
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/internal/belief"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -116,7 +117,7 @@ func runEnterMode(ctx context.Context, st *kernel.Store, db *sql.DB, scenarioID,
 		fail("--claim-type must be 'postulated' for the entry path")
 	}
 
-	beliefID, err := st.EnterBelief(ctx, scenarioID, claim, kernel.Postulated, kernel.FullDebt)
+	beliefID, err := st.EnterBelief(ctx, scenarioID, claim, kernel.Postulated, belief.WizardDebt())
 	if err != nil {
 		fail(fmt.Sprintf("enter belief: %v", err))
 	}

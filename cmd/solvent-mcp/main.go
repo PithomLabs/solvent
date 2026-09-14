@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/PithomLabs/solvent/adapter/github"
-	"github.com/PithomLabs/solvent/kernel"
 	"github.com/PithomLabs/solvent/service/audit"
 	"github.com/PithomLabs/solvent/service/authority"
 	"github.com/PithomLabs/solvent/service/executor"
@@ -214,11 +213,7 @@ func main() {
 
 	server.AddTool(&mcp.Tool{
 		Name: "solvent_retire_debt",
-		// The valid items are no longer restated in prose. They were, and the prose was
-		// one of five hand-copies of kernel.FullDebt; the Phase 5 vocabulary rename had
-		// to find every one of them. The enum below is generated from the kernel, so
-		// this description can only describe behaviour, not enumerate values.
-		Description: "Record that one review obligation on a belief has been discharged. debt_item must be one of the six items the database issued (see the enum). An unrecognised item is refused rather than silently ignored.",
+		Description: "Record that one review obligation on a belief has been discharged. debt_item is an opaque string — valid values can be discovered by inspecting the belief's current debt via solvent_ledger. An empty string is rejected as malformed input.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -232,13 +227,8 @@ func main() {
 					"description": "UUID of the belief",
 				},
 				"debt_item": map[string]any{
-					"type": "string",
-					// Generated, not transcribed. Advertising the vocabulary to the agent
-					// is only half the job: this SDK's low-level AddTool does not validate
-					// arguments against the schema, so the enum is documentation and
-					// handleSolventRetireDebt does the refusing.
-					"enum":        kernel.FullDebt,
-					"description": "Debt item to retire. Must be one of the six the database issued.",
+					"type":        "string",
+					"description": "Opaque debt identifier to retire. Inspect the belief's current debt to discover valid values.",
 				},
 			},
 			"required": []string{"scenario", "belief_id", "debt_item"},

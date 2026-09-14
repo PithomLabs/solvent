@@ -243,11 +243,11 @@ func setupExecutionScenario(t *testing.T, db *sql.DB) (string, string, string, s
 	principalID := testPrincipalID
 
 	// Create and promote belief.
-	beliefID, err := st.EnsureBelief(ctx, scenarioID, "test belief for execution", kernel.Derived, kernel.FullDebt)
+	beliefID, err := st.EnsureBelief(ctx, scenarioID, "test belief for execution", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("ensure belief: %v", err)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		_ = st.RetireDebt(ctx, scenarioID, beliefID, item)
 	}
 	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {
@@ -301,11 +301,11 @@ func TestExecute_CrossPrincipalDenied(t *testing.T) {
 	otherPrincipalID := createTestPrincipal(t, db)
 
 	// Create and promote belief under otherPrincipalID.
-	beliefID, err := st.EnsureBelief(ctx, scenarioID, "cross-principal belief", kernel.Derived, kernel.FullDebt)
+	beliefID, err := st.EnsureBelief(ctx, scenarioID, "cross-principal belief", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("ensure belief: %v", err)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		_ = st.RetireDebt(ctx, scenarioID, beliefID, item)
 	}
 	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {
@@ -412,7 +412,7 @@ func TestExecute_WrongBeliefDenied(t *testing.T) {
 	// Create a different belief in the same scenario.
 	ctx := context.Background()
 	st := kernel.New(db)
-	wrongBeliefID, err := st.EnsureBelief(ctx, scenarioID, "wrong belief", kernel.Derived, kernel.FullDebt)
+	wrongBeliefID, err := st.EnsureBelief(ctx, scenarioID, "wrong belief", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("ensure wrong belief: %v", err)
 	}
@@ -570,11 +570,11 @@ func setupBoundExecutionScenario(t *testing.T, db *sql.DB) (string, string, stri
 	scenarioID := createTestScenario(t)
 	principalID := testPrincipalID
 
-	beliefID, err := st.EnsureBelief(ctx, scenarioID, "test belief for bound execution", kernel.Derived, kernel.FullDebt)
+	beliefID, err := st.EnsureBelief(ctx, scenarioID, "test belief for bound execution", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("ensure belief: %v", err)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		_ = st.RetireDebt(ctx, scenarioID, beliefID, item)
 	}
 	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {
@@ -637,11 +637,11 @@ func TestExecute_ConfusedDeputy(t *testing.T) {
 	principalID := testPrincipalID
 
 	// Create and promote belief.
-	beliefID, err := st.EnsureBelief(ctx, scenarioID, "confused deputy belief", kernel.Derived, kernel.FullDebt)
+	beliefID, err := st.EnsureBelief(ctx, scenarioID, "confused deputy belief", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("ensure belief: %v", err)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		_ = st.RetireDebt(ctx, scenarioID, beliefID, item)
 	}
 	if err := st.Promote(ctx, scenarioID, beliefID); err != nil {

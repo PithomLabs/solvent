@@ -10,6 +10,7 @@ import (
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/internal/view"
 	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/internal/belief"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -34,6 +35,7 @@ func TestMain(m *testing.M) {
 		"../../db/007_service_tables.sql",
 		"../../db/008_executing_state.sql",
 		"../../db/009_exact_authority_binding.sql",
+	"../../db/010_debt_opaque.sql",
 	}
 	if err := testdb.Reset(ctx, dsnExplain, schemaPaths...); err != nil {
 		fmt.Fprintf(os.Stderr, "view explain tests cannot start: %v\n", err)
@@ -69,7 +71,7 @@ func TestExplain_AskBeforePromotion(t *testing.T) {
 	sc := scenarioExplain(1)
 	st := kernel.New(sharedExplain)
 
-	beliefID, err := st.EnterBelief(ctx, sc, "explain test: ask before promotion", kernel.Derived, kernel.FullDebt)
+	beliefID, err := st.EnterBelief(ctx, sc, "explain test: ask before promotion", kernel.Derived, belief.WizardDebt())
 	if err != nil {
 		t.Fatalf("EnterBelief: %v", err)
 	}
@@ -134,11 +136,11 @@ func TestExplain_PromotionAfterDebtDischarge(t *testing.T) {
 	sc := scenarioExplain(2)
 	st := kernel.New(sharedExplain)
 
-	beliefID, err := st.EnterBelief(ctx, sc, "explain test: promotion after discharge", kernel.Derived, kernel.FullDebt)
+	beliefID, err := st.EnterBelief(ctx, sc, "explain test: promotion after discharge", kernel.Derived, belief.WizardDebt())
 	if err != nil {
 		t.Fatalf("EnterBelief: %v", err)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range belief.WizardDebt() {
 		if err := st.RetireDebt(ctx, sc, beliefID, item); err != nil {
 			t.Fatalf("RetireDebt %s: %v", item, err)
 		}
@@ -190,11 +192,11 @@ func TestExplain_ReassessmentFalsification(t *testing.T) {
 	sc := scenarioExplain(3)
 	st := kernel.New(sharedExplain)
 
-	beliefID, err := st.EnterBelief(ctx, sc, "explain test: reassessment", kernel.Derived, kernel.FullDebt)
+	beliefID, err := st.EnterBelief(ctx, sc, "explain test: reassessment", kernel.Derived, belief.WizardDebt())
 	if err != nil {
 		t.Fatalf("EnterBelief: %v", err)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range belief.WizardDebt() {
 		_ = st.RetireDebt(ctx, sc, beliefID, item)
 	}
 	if err := st.Promote(ctx, sc, beliefID); err != nil {
@@ -247,7 +249,7 @@ func TestExplain_ReadOnly(t *testing.T) {
 	ctx := context.Background()
 	sc := scenarioExplain(4)
 	st := kernel.New(sharedExplain)
-	beliefID, _ := st.EnterBelief(ctx, sc, "read-only test", kernel.Derived, kernel.FullDebt)
+	beliefID, _ := st.EnterBelief(ctx, sc, "read-only test", kernel.Derived, belief.WizardDebt())
 
 	beforeCount := countBeliefs(t, ctx, sc)
 	snap, _ := view.GetSnapshot(ctx, sharedExplain, sc, view.SnapshotOpts{BeliefID: beliefID, IncludeEvidence: true})

@@ -33,6 +33,7 @@ var schemaPaths = []string{
 	"../../db/007_service_tables.sql",
 	"../../db/008_executing_state.sql",
 	"../../db/009_exact_authority_binding.sql",
+	"../../db/010_debt_opaque.sql",
 }
 
 func TestMain(m *testing.M) {
@@ -140,11 +141,11 @@ func createPrincipal(t *testing.T, ctx context.Context, st *kernel.Store, ptype,
 
 func createAndPromoteBelief(t *testing.T, ctx context.Context, st *kernel.Store, scenarioID, claim string) string {
 	t.Helper()
-	id, err := st.EnterBelief(ctx, scenarioID, claim, kernel.Derived, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, scenarioID, claim, kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("setup (enter belief): %v", err)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		_ = st.RetireDebt(ctx, scenarioID, id, item)
 	}
 	if err := st.Promote(ctx, scenarioID, id); err != nil {

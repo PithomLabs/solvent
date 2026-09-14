@@ -8,7 +8,7 @@ import (
 
 	"github.com/PithomLabs/solvent/internal/corpus"
 	"github.com/PithomLabs/solvent/internal/wizard"
-	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/internal/belief"
 )
 
 // atFalsify drives a scenario all the way to the FALSIFY screen: refusals logged, all
@@ -22,7 +22,7 @@ func atFalsify(t *testing.T, s *wizard.Server) (sid, bid string) {
 	s.Promote(ctx, sid, bid)
 	s.Authorize(ctx, sid, bid)
 	selectHits(t, s, bid, "falsify setup", 2)
-	for _, item := range kernel.FullDebt {
+	for _, item := range belief.WizardDebt() {
 		if v := s.Discharge(ctx, sid, bid, item, operatorArtifacts[item]); !v.OK {
 			t.Fatalf("setup: discharge %s: %+v", item, v)
 		}
@@ -348,7 +348,7 @@ func TestW27_Screen3OverHTTP(t *testing.T) {
 		c.do(http.MethodPost, wizard.Prefix+"/api/select",
 			`{"corpus_id":"`+h["corpus_id"].(string)+`","query":"http screen3","distance":`+jsonNum(h["distance"])+`,"on":true}`)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range belief.WizardDebt() {
 		c.do(http.MethodPost, wizard.Prefix+"/api/discharge",
 			`{"check":"`+item+`","artifact":"`+operatorArtifacts[item]+`"}`)
 	}

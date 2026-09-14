@@ -10,6 +10,7 @@ import (
 
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/internal/belief"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -25,6 +26,7 @@ var schemaPaths = []string{
 	"../../db/007_service_tables.sql",
 	"../../db/008_executing_state.sql",
 	"../../db/009_exact_authority_binding.sql",
+	"../../db/010_debt_opaque.sql",
 }
 
 func TestMain(m *testing.M) {
@@ -76,11 +78,11 @@ func TestC_SixDebtsUntouched(t *testing.T) {
 		t.Fatalf("ingest: %v", err)
 	}
 
-	// The adapter must retire exactly zero debt — all six kernel.FullDebt items remain.
-	if len(res.DebtRemaining) != len(kernel.FullDebt) {
-		t.Fatalf("debt count = %d, want %d (kernel.FullDebt)", len(res.DebtRemaining), len(kernel.FullDebt))
+	// The adapter must retire exactly zero debt — all six belief.WizardDebt() items remain.
+	if len(res.DebtRemaining) != len(belief.WizardDebt()) {
+		t.Fatalf("debt count = %d, want %d (belief.WizardDebt())", len(res.DebtRemaining), len(belief.WizardDebt()))
 	}
-	for i, item := range kernel.FullDebt {
+	for i, item := range belief.WizardDebt() {
 		if res.DebtRemaining[i] != item {
 			t.Errorf("debt[%d] = %q, want %q", i, res.DebtRemaining[i], item)
 		}

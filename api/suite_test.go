@@ -24,6 +24,7 @@ var schemaPaths = []string{
 	"../db/007_service_tables.sql",
 	"../db/008_executing_state.sql",
 		"../db/009_exact_authority_binding.sql",
+	"../db/010_debt_opaque.sql",
 }
 
 func TestMain(m *testing.M) {

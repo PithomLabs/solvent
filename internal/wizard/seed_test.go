@@ -15,7 +15,7 @@ import (
 	"github.com/PithomLabs/solvent/internal/corpus"
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/internal/wizard"
-	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/internal/belief"
 )
 
 var schemaPaths = []string{
@@ -28,6 +28,7 @@ var schemaPaths = []string{
 	"../../db/007_service_tables.sql",
 	"../../db/008_executing_state.sql",
 	"../../db/009_exact_authority_binding.sql",
+	"../../db/010_debt_opaque.sql",
 }
 
 // Scenario namespace. 1111..6666 belong to the kernel/belief/intent/pipeline suites,
@@ -171,8 +172,8 @@ func TestW01_SeedIsPreFalsification(t *testing.T) {
 	if st.DescStatus != "entered" {
 		t.Errorf("descendant status = %q, want entered", st.DescStatus)
 	}
-	if st.DescDebt != len(kernel.FullDebt) {
-		t.Errorf("descendant debt = %d, want %d", st.DescDebt, len(kernel.FullDebt))
+	if st.DescDebt != len(belief.WizardDebt()) {
+		t.Errorf("descendant debt = %d, want %d", st.DescDebt, len(belief.WizardDebt()))
 	}
 	if st.Edges != 1 {
 		t.Errorf("edges = %d, want exactly 1", st.Edges)

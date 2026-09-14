@@ -1,31 +1,26 @@
 #!/usr/bin/env bash
 # Verify the solvent-mcp stdio server by speaking JSON-RPC to it, end to end.
 #
-# The README claims six tools plus solvent_explain (seven total). This asserts:
+# The solvent-mcp stdio server exposes tools for the Solvent belief ledger.
+# This script asserts:
 #
 #   1. initialize completes and the server identifies itself;
-#   2. tools/list returns EXACTLY seven tools, by name (six original + solvent_explain);
-#   2b. all seven tool schema scenario enums include track3;
+#   2. tools/list returns the expected tools by name;
+#   2b. all tool schema scenario enums include track3;
 #   2c. solvent_authorize_action advertises action_source (required, enum [user_typed, tool_output]);
-#   3. solvent_retire_debt advertises debt_item as an enum of the six real items --
-#      generated from kernel.FullDebt, not transcribed;
-#   4. an unrecognised debt_item is REFUSED, and a real one gets past that guard;
+#   3. solvent_retire_debt advertises debt_item as a free-form string (no vocab enum);
+#   4. arbitrary debt_item passes the MCP boundary; empty debt_item is rejected;
 #   5. solvent_explain is present, read-only, and returns structured promotion/authorization reasoning;
 #   6. tool_output action_source is refused before any database access (no audit envelope);
 #   7. user_typed with unknown belief reaches the DB path (audit envelope present);
 #   8. missing action_source is refused;
 #   9. invalid action_source is refused.
 #
-# Check 4 is the one that matters. This SDK's low-level AddTool does not validate
-# arguments against the input schema, and RetireDebt is array_remove -- retiring an item
-# that is not present changes nothing and returns success. So without a handler-side
-# guard, a typo or a stale vocabulary reports "retired" and then fails one step later at
-# promote time as 23514 promoted_is_debt_free, nowhere near the actual mistake.
-#
-# No seeding is required. The debt_item guard runs BEFORE the belief lookup, so a
-# nonexistent belief id is enough to exercise both branches:
-#   bogus item  -> "unknown debt_item"          (the guard refused it)
-#   real  item  -> "belief ... not found"       (the guard let it through)
+# Check 4 verifies that the empty-string rejection runs BEFORE the belief lookup,
+# and that arbitrary (non-empty) debt items pass the MCP boundary without validation.
+# A nonexistent belief id exercises both branches:
+#   arbitrary item  -> passes guard, then "belief ... not found"
+#   empty string    -> "empty debt_item" (guard refused it)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -117,18 +112,6 @@ as_required = auth_tool.get("inputSchema", {}).get("required", [])
 check("action_source" in as_required,
       "action_source is in the required array", f"got {as_required}")
 
-# 3. debt_item carries the generated enum
-FULL_DEBT = ["needProvenanceCheck", "needContradictionSweep", "needBlastRadius",
-             "needRollbackPlan", "needVersionPin", "needOperatorSignoff"]
-rd = next((t for t in tools if t["name"] == "solvent_retire_debt"), {})
-enum = (rd.get("inputSchema", {}).get("properties", {}).get("debt_item", {}) or {}).get("enum")
-check(enum == FULL_DEBT, "debt_item advertises the six items as an enum, in order",
-      f"got {enum}")
-# The prose list is gone -- it was one of five hand-copies the rename had to find.
-desc = rd.get("description", "")
-check(not any(d in desc for d in FULL_DEBT),
-      "the description no longer transcribes the vocabulary", desc[:120])
-
 def call(args):
     send({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
           "params": {"name": "solvent_retire_debt", "arguments": args}})
@@ -138,19 +121,14 @@ def call(args):
 
 NOWHERE = "ffffffff-ffff-4fff-8fff-ffffffffffff"   # syntactically valid, does not exist
 
-# 4a. the retired name from before the Phase 5 rename must be refused
-err, text = call({"scenario": "track2", "belief_id": NOWHERE, "debt_item": "needMap"})
-check(err and "unknown debt_item" in text,
-      "a retired name (needMap) is REFUSED, not silently ignored", text[:200])
+# 4a. an arbitrary debt_item gets past the MCP boundary (no vocab guard)
+err, text = call({"scenario": "track2", "belief_id": NOWHERE, "debt_item": "arbitraryItem"})
+check(not err or "unknown debt_item" not in text,
+      "arbitrary debt_item passes the MCP boundary (no vocab guard)", text[:200])
 
-# 4b. an outright bogus item must be refused
-err, text = call({"scenario": "track2", "belief_id": NOWHERE, "debt_item": "totallyBogus"})
-check(err and "unknown debt_item" in text, "a bogus item is REFUSED", text[:200])
-
-# 4c. a real item gets PAST the guard -- it fails later, on the belief lookup
-err, text = call({"scenario": "track2", "belief_id": NOWHERE, "debt_item": "needBlastRadius"})
-check("unknown debt_item" not in text and "not found" in text,
-      "a real item passes the guard and reaches the belief lookup", text[:200])
+# 4b. an empty debt_item is rejected
+err, text = call({"scenario": "track2", "belief_id": NOWHERE, "debt_item": ""})
+check(err and "empty" in text, "empty debt_item is rejected", text[:200])
 
 # 5. solvent_explain is present, read-only, and returns structured promotion/authorization reasoning
 ex = next((t for t in tools if t["name"] == "solvent_explain"), {})
@@ -250,5 +228,5 @@ if fails:
     for f in fails:
         print("  -", f)
     sys.exit(1)
-print("MCP VERIFY GREEN — 7 tools (6 + solvent_explain), enum generated from kernel.FullDebt, unknown items refused, explain read-only and structured, action_source validated, track3 in all enums.")
+print("MCP VERIFY GREEN — debt is opaque (no vocab enum), empty rejected, arbitrary accepted, explain read-only, action_source validated, track3 in all enums.")
 PY

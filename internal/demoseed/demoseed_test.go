@@ -26,6 +26,7 @@ var schemaPaths = []string{
 	"../../db/007_service_tables.sql",
 	"../../db/008_executing_state.sql",
 	"../../db/009_exact_authority_binding.sql",
+	"../../db/010_debt_opaque.sql",
 }
 
 // Scenario namespace for this suite. 1111..6666 belong to the kernel, belief,
@@ -66,7 +67,7 @@ func TestMain(m *testing.M) {
 // enterClaim creates a belief with the exact claim text the edge matches on.
 func enterClaim(t *testing.T, sid, claim string, ct kernel.ClaimType) string {
 	t.Helper()
-	id, err := kernel.New(shared).EnterBelief(context.Background(), sid, claim, ct, kernel.FullDebt)
+	id, err := kernel.New(shared).EnterBelief(context.Background(), sid, claim, ct, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("EnterBelief(%q): %v", claim, err)
 	}
@@ -77,7 +78,7 @@ func promote(t *testing.T, scenarioID, id string) {
 	t.Helper()
 	st := kernel.New(shared)
 	ctx := context.Background()
-	for _, d := range kernel.FullDebt {
+	for _, d := range []string{"testDebt"} {
 		if err := st.RetireDebt(ctx, scenarioID, id, d); err != nil {
 			t.Fatalf("RetireDebt(%s): %v", d, err)
 		}

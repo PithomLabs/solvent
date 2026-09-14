@@ -168,7 +168,7 @@ func TestIntegration_DeterminismAcrossReplays(t *testing.T) {
 	}
 }
 
-func TestIntegration_RealFixtureRetiresFullDebt(t *testing.T) {
+func TestIntegration_RealFixtureRetiresWizardDebt(t *testing.T) {
 	ctx := context.Background()
 	sc := integrationScenario(6)
 

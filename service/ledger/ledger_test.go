@@ -33,6 +33,7 @@ var schemaPaths = []string{
 	"../../db/007_service_tables.sql",
 	"../../db/008_executing_state.sql",
 		"../../db/009_exact_authority_binding.sql",
+	"../../db/010_debt_opaque.sql",
 }
 
 func TestMain(m *testing.M) {
@@ -95,7 +96,7 @@ func createTestTarget(t *testing.T, ctx context.Context, principalID string) str
 
 func createTestBelief(t *testing.T, ctx context.Context, scenarioID string) string {
 	t.Helper()
-	id, err := kern.EnterBelief(ctx, scenarioID, "test belief for ledger", kernel.Derived, kernel.FullDebt)
+	id, err := kern.EnterBelief(ctx, scenarioID, "test belief for ledger", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("create belief: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestLedger_AuthorizeAndCreateIntent_Allowed(t *testing.T) {
 	beliefID := createTestBelief(t, ctx, scenarioID)
 
 	// Retire all debts so the belief can be promoted.
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		if err := kern.RetireDebt(ctx, scenarioID, beliefID, item); err != nil {
 			t.Fatalf("retire debt %q: %v", item, err)
 		}
@@ -222,14 +223,14 @@ func TestLedger_DomainPortableVocab(t *testing.T) {
 	ctx := context.Background()
 	scenarioID := fmt.Sprintf("00000000-0000-0000-0000-%012x", time.Now().UnixNano()%0xFFFFFFFFFFFF)
 
-	// Physics-domain caller: arbitrary vocabulary, NOT kernel.FullDebt.
+	// Physics-domain caller: arbitrary vocabulary, NOT []string{"testDebt"}.
 	physicsVocab := []string{"proof_check", "counterexample_search", "applicability_review"}
 	beliefID, err := kern.EnterBelief(ctx, scenarioID, "quantum superposition holds", kernel.Derived, physicsVocab)
 	if err != nil {
 		t.Fatalf("EnterBelief with arbitrary vocab: %v", err)
 	}
 
-	// Verify the service did NOT inject FullDebt.
+	// Verify the service did NOT replace the caller-supplied debt.
 	var stored string
 	if err := db.QueryRowContext(ctx,
 		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, beliefID).Scan(&stored); err != nil {

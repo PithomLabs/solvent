@@ -43,7 +43,6 @@ type Contract interface {
 var (
 	_ Contract             = (*Store)(nil)
 	_ func(*sql.DB) *Store = New
-	_ []string             = FullDebt
 	_ ClaimType            = Derived
 	_ ClaimType            = Accommodated
 	_ ClaimType            = Postulated

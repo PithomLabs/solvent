@@ -27,6 +27,7 @@ var schemaPaths = []string{
 	"../../db/007_service_tables.sql",
 	"../../db/008_executing_state.sql",
 	"../../db/009_exact_authority_binding.sql",
+	"../../db/010_debt_opaque.sql",
 }
 
 var (
@@ -394,11 +395,11 @@ func TestEndToEnd_ProposeIfNew_Idempotent(t *testing.T) {
 
 	// Create a promoted belief.
 	st := kernel.New(shared)
-	beliefID, err := st.EnsureBelief(ctx, sc, "test belief for idempotency", kernel.Derived, kernel.FullDebt)
+	beliefID, err := st.EnsureBelief(ctx, sc, "test belief for idempotency", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("EnsureBelief: %v", err)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		if err := st.RetireDebt(ctx, sc, beliefID, item); err != nil {
 			t.Fatalf("RetireDebt(%s): %v", item, err)
 		}

@@ -118,7 +118,7 @@ func TestIntegration_ConcurrentRevokeTarget(t *testing.T) {
 
 	// Retire debts, promote the belief, and attach a justification so the proposal is valid.
 	kern := kernel.New(db)
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		if err := kern.RetireDebt(context.Background(), scenarioID, beliefID, item); err != nil {
 			t.Fatalf("retire debt %q: %v", item, err)
 		}

@@ -20,6 +20,7 @@ import (
 	"github.com/PithomLabs/solvent/adapter/github"
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/service/audit"
 	"github.com/PithomLabs/solvent/service/authority"
 	"github.com/PithomLabs/solvent/service/executor"
@@ -79,12 +80,12 @@ func main() {
 	}
 
 	// Create a promoted belief.
-	beliefID, err := st.EnterBelief(ctx, sid, "etcd v3.5.x is safe to deploy", kernel.Derived, kernel.FullDebt)
+	beliefID, err := st.EnterBelief(ctx, sid, "etcd v3.5.x is safe to deploy", kernel.Derived, belief.WizardDebt())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "enter belief: %v\n", err)
 		os.Exit(1)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range belief.WizardDebt() {
 		_ = st.RetireDebt(ctx, sid, beliefID, item)
 	}
 	if err := st.Promote(ctx, sid, beliefID); err != nil {

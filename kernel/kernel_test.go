@@ -11,6 +11,7 @@ import (
 
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/kernel"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Fixed scenario UUIDs, one per case, so cases cannot interfere and the transcript is
@@ -51,7 +52,7 @@ func TestW1_B01_EnterBelief(t *testing.T) {
 	st := kernel.New(shared)
 	sc := scenario(1)
 
-	id, err := st.EnterBelief(ctx, sc, "a claim at the door", kernel.Accommodated, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, sc, "a claim at the door", kernel.Accommodated, []string{"testDebt"})
 
 	var status string
 	var finalTruth bool
@@ -62,46 +63,47 @@ func TestW1_B01_EnterBelief(t *testing.T) {
 			id).Scan(&status, &finalTruth, &debtLen)
 	}
 
-	ok := err == nil && looksLikeUUID(id) && status == "entered" && !finalTruth && debtLen == 6
+	ok := err == nil && looksLikeUUID(id) && status == "entered" && !finalTruth && debtLen == 1
 	rec.check(t, ok, Case{
 		ID: "B-01", Wave: "1",
-		Purpose:   "A claim enters unpromoted, carrying its full starting debt",
-		Expected:  "parseable UUID returned; status='entered', final_truth=false, 6 debt items",
+		Purpose:   "A claim enters unpromoted, carrying its supplied starting debt",
+		Expected:  "parseable UUID returned; status='entered', final_truth=false, 1 debt item",
 		Observed:  fmt.Sprintf("id parseable=%t, status=%q, final_truth=%t, debt items=%d", looksLikeUUID(id), status, finalTruth, debtLen),
-		Invariant: "contract §4 EnterBelief — never gated, full debt at the door",
+		Invariant: "contract §4 EnterBelief — never gated, caller-supplied debt at the door",
 		Receipt:   receiptOf(err),
 	})
 }
 
-// B-17 discharges D10: pgx encoding a Go []string into STRING[]. M1 could only
-// confirm the expected parameter type; nothing had ever executed.
+// B-17 discharges D10: pgx encoding a Go []string into STRING[].
+// Tests that arbitrary caller-supplied debt identifiers encode correctly.
 func TestW1_B17_DebtEncoding(t *testing.T) {
 	rec.begin("1")
 	ctx := context.Background()
 	st := kernel.New(shared)
 	sc := scenario(17)
 
-	id, err := st.EnterBelief(ctx, sc, "claim whose debt encoding is under test", kernel.Derived, kernel.FullDebt)
+	arbitraryDebt := []string{"foo", "bar", "baz"}
+	id, err := st.EnterBelief(ctx, sc, "claim whose debt encoding is under test", kernel.Derived, arbitraryDebt)
 
 	var stored string
 	if err == nil {
 		err = shared.QueryRowContext(ctx,
 			`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, id).Scan(&stored)
 	}
-	want := strings.Join(kernel.FullDebt, ",")
+	want := strings.Join(arbitraryDebt, ",")
 
 	rec.check(t, err == nil && stored == want, Case{
 		ID: "B-17", Wave: "1",
 		Purpose:   "Discharge D10 — a Go []string encodes into STRING[] element-for-element, in order",
-		Expected:  "stored debt == kernel.FullDebt: " + want,
+		Expected:  "stored debt == [foo,bar,baz]: " + want,
 		Observed:  "stored debt == " + stored,
-		Invariant: "M1-R2 / D10 — the last open encoding assumption",
+		Invariant: "M1-R2 / D10 — arbitrary debt encodes correctly",
 		Receipt:   receiptOf(err),
 	})
 }
 
-// B-23 discharges M1-R3: the Go constant and the DDL DEFAULT must agree.
-func TestW1_B23_DebtDefaultDrift(t *testing.T) {
+// B-23 verifies the DDL DEFAULT produces an empty debt array.
+func TestW1_B23_DebtDefaultIsEmpty(t *testing.T) {
 	rec.begin("1")
 	ctx := context.Background()
 	sc := scenario(23)
@@ -112,19 +114,18 @@ func TestW1_B23_DebtDefaultDrift(t *testing.T) {
 		INSERT INTO belief (id, scenario_id, claim, claim_type)
 		VALUES ($1::UUID, $2::UUID, 'claim relying on the DDL default', 'postulated')`, id, sc)
 
-	var stored string
+	var debtLen int
 	if err == nil {
 		err = shared.QueryRowContext(ctx,
-			`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, id).Scan(&stored)
+			`SELECT coalesce(array_length(debt,1),0) FROM belief WHERE id=$1::UUID`, id).Scan(&debtLen)
 	}
-	want := strings.Join(kernel.FullDebt, ",")
 
-	rec.check(t, err == nil && stored == want, Case{
+	rec.check(t, err == nil && debtLen == 0, Case{
 		ID: "B-23", Wave: "1",
-		Purpose:   "Discharge M1-R3 — kernel.FullDebt (Go) and the ARRAY[...] DEFAULT (DDL) have not drifted",
-		Expected:  "DDL default == kernel.FullDebt: " + want,
-		Observed:  "DDL default == " + stored,
-		Invariant: "M1-R3 — the six debt items are encoded in two places",
+		Purpose:   "Discharge M1-R3 — DDL DEFAULT produces empty debt array",
+		Expected:  "DDL default == empty array: 0 debt items",
+		Observed:  fmt.Sprintf("DDL default == %d debt items", debtLen),
+		Invariant: "M1-R3 — debt default is intentionally empty",
 		Receipt:   receiptOf(err),
 	})
 }
@@ -135,7 +136,7 @@ func TestW1_B02_AddEvidence(t *testing.T) {
 	st := kernel.New(shared)
 	sc := scenario(2)
 
-	id, err := st.EnterBelief(ctx, sc, "claim awaiting evidence", kernel.Accommodated, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, sc, "claim awaiting evidence", kernel.Accommodated, []string{"testDebt"})
 	beforeStatus, beforeDebt := beliefState(t, ctx, id)
 
 	if err == nil {
@@ -170,9 +171,9 @@ func TestW1_B03_RetireDebt(t *testing.T) {
 	st := kernel.New(shared)
 	sc := scenario(3)
 
-	id, err := st.EnterBelief(ctx, sc, "claim retiring one debt", kernel.Derived, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, sc, "claim retiring one debt", kernel.Derived, []string{"testDebt"})
 	if err == nil {
-		err = st.RetireDebt(ctx, sc, id, "needBlastRadius")
+		err = st.RetireDebt(ctx, sc, id, "testDebt")
 	}
 
 	var stored string
@@ -180,7 +181,7 @@ func TestW1_B03_RetireDebt(t *testing.T) {
 		err = shared.QueryRowContext(ctx,
 			`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, id).Scan(&stored)
 	}
-	want := strings.Join(without(kernel.FullDebt, "needBlastRadius"), ",")
+	want := strings.Join(without([]string{"testDebt"}, "testDebt"), ",")
 
 	rec.check(t, err == nil && stored == want, Case{
 		ID: "B-03", Wave: "1",
@@ -198,16 +199,16 @@ func TestW1_B04_RetireDebtIdempotent(t *testing.T) {
 	st := kernel.New(shared)
 	sc := scenario(4)
 
-	id, err := st.EnterBelief(ctx, sc, "claim retiring an absent debt", kernel.Derived, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, sc, "claim retiring an absent debt", kernel.Derived, []string{"testDebt"})
 	if err == nil {
-		err = st.RetireDebt(ctx, sc, id, "needBlastRadius")
+		err = st.RetireDebt(ctx, sc, id, "absentItem")
 	}
 	before := debtString(t, ctx, id)
 
 	// Same item again: absent now, must be a no-op rather than an error.
 	var secondErr error
 	if err == nil {
-		secondErr = st.RetireDebt(ctx, sc, id, "needBlastRadius")
+		secondErr = st.RetireDebt(ctx, sc, id, "absentItem")
 	}
 	after := debtString(t, ctx, id)
 
@@ -227,7 +228,7 @@ func TestW1_B05_Promote(t *testing.T) {
 	st := kernel.New(shared)
 	sc := scenario(5)
 
-	id, err := st.EnterBelief(ctx, sc, "claim whose debt is fully retired", kernel.Derived, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, sc, "claim whose debt is fully retired", kernel.Derived, []string{"testDebt"})
 	if err == nil {
 		err = retireAll(ctx, st, sc, id)
 	}
@@ -253,7 +254,7 @@ func TestW1_B09_I1_PromoteWithDebt(t *testing.T) {
 	st := kernel.New(shared)
 	sc := scenario(9)
 
-	id, setupErr := st.EnterBelief(ctx, sc, "claim still carrying debt", kernel.Accommodated, kernel.FullDebt)
+	id, setupErr := st.EnterBelief(ctx, sc, "claim still carrying debt", kernel.Accommodated, []string{"testDebt"})
 	if setupErr != nil {
 		t.Fatalf("B-09 setup: %v", setupErr)
 	}
@@ -331,7 +332,7 @@ func TestW1_B18_RetryClassification(t *testing.T) {
 
 	// Seed through the ordinary pool: a debt-free belief that Promote must accept.
 	seed := kernel.New(shared)
-	id, err := seed.EnterBelief(ctx, sc, "claim promoted under injected retries", kernel.Derived, kernel.FullDebt)
+	id, err := seed.EnterBelief(ctx, sc, "claim promoted under injected retries", kernel.Derived, []string{"testDebt"})
 	if err == nil {
 		err = retireAll(ctx, seed, sc, id)
 	}
@@ -441,7 +442,7 @@ func TestW1_B11_I3_IntentOnUnpromoted(t *testing.T) {
 	st := kernel.New(shared)
 	sc := scenario(11)
 
-	id, setupErr := st.EnterBelief(ctx, sc, "claim that never left the door", kernel.Postulated, kernel.FullDebt)
+	id, setupErr := st.EnterBelief(ctx, sc, "claim that never left the door", kernel.Postulated, []string{"testDebt"})
 	if setupErr != nil {
 		t.Fatalf("B-11 setup: %v", setupErr)
 	}
@@ -636,7 +637,7 @@ func TestCS1_RetireDebt_CrossScenario(t *testing.T) {
 	st := kernel.New(shared)
 	scA, scB := scenario(501), scenario(502)
 
-	id, err := st.EnterBelief(ctx, scA, "belief for cross-scenario retire", kernel.Derived, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, scA, "belief for cross-scenario retire", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -667,7 +668,7 @@ func TestCS2_RetireDebt_SameScenario_Idempotent(t *testing.T) {
 	st := kernel.New(shared)
 	sc := scenario(503)
 
-	id, err := st.EnterBelief(ctx, sc, "belief for idempotent retire", kernel.Derived, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, sc, "belief for idempotent retire", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -693,7 +694,7 @@ func TestCS3_Promote_CrossScenario(t *testing.T) {
 	st := kernel.New(shared)
 	scA, scB := scenario(504), scenario(505)
 
-	id, err := st.EnterBelief(ctx, scA, "belief for cross-scenario promote", kernel.Derived, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, scA, "belief for cross-scenario promote", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -727,7 +728,7 @@ func TestCS4_Discharge_CrossScenario(t *testing.T) {
 	st := kernel.New(shared)
 	scA, scB := scenario(506), scenario(507)
 
-	id, err := st.EnterBelief(ctx, scA, "belief for cross-scenario discharge", kernel.Derived, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, scA, "belief for cross-scenario discharge", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -763,7 +764,7 @@ func TestCS5_Discharge_SameScenario_Atomic(t *testing.T) {
 	st := kernel.New(shared)
 	sc := scenario(508)
 
-	id, err := st.EnterBelief(ctx, sc, "belief for same-scenario discharge", kernel.Derived, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, sc, "belief for same-scenario discharge", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("setup: %v", err)
 	}
@@ -973,7 +974,7 @@ func TestW3_EnsureBelief_New(t *testing.T) {
 	st := kernel.New(shared)
 	sc := scenario(30)
 
-	id, err := st.EnsureBelief(ctx, sc, "claim created by EnsureBelief", kernel.Derived, kernel.FullDebt)
+	id, err := st.EnsureBelief(ctx, sc, "claim created by EnsureBelief", kernel.Derived, []string{"testDebt"})
 
 	var status string
 	var debtLen int
@@ -983,11 +984,11 @@ func TestW3_EnsureBelief_New(t *testing.T) {
 			id).Scan(&status, &debtLen)
 	}
 
-	ok := err == nil && looksLikeUUID(id) && status == "entered" && debtLen == 6
+	ok := err == nil && looksLikeUUID(id) && status == "entered" && debtLen == 1
 	rec.check(t, ok, Case{
 		ID: "W3-Ensure-New", Wave: "3",
 		Purpose:   "EnsureBelief creates a new belief with full debt when claim does not exist",
-		Expected:  "parseable UUID; status='entered', 6 debt items",
+		Expected:  "parseable UUID; status=.entered., 1 debt item",
 		Observed:  fmt.Sprintf("id parseable=%t, status=%q, debt items=%d", looksLikeUUID(id), status, debtLen),
 		Invariant: "EnsureBelief — find-or-create in one transaction",
 		Receipt:   receiptOf(err),
@@ -1001,12 +1002,12 @@ func TestW3_EnsureBelief_Existing(t *testing.T) {
 	sc := scenario(31)
 	claim := "claim that already exists"
 
-	id1, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived, kernel.FullDebt)
+	id1, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("first EnsureBelief: %v", err)
 	}
 
-	id2, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived, kernel.FullDebt)
+	id2, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived, []string{"testDebt"})
 
 	var count int
 	_ = shared.QueryRowContext(ctx,
@@ -1030,11 +1031,11 @@ func TestW3_EnsureBelief_DifferentScenario(t *testing.T) {
 	scA, scB := scenario(32), scenario(320)
 	claim := "same claim in different scenarios"
 
-	idA, err := st.EnsureBelief(ctx, scA, claim, kernel.Derived, kernel.FullDebt)
+	idA, err := st.EnsureBelief(ctx, scA, claim, kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("scenario A: %v", err)
 	}
-	idB, err := st.EnsureBelief(ctx, scB, claim, kernel.Derived, kernel.FullDebt)
+	idB, err := st.EnsureBelief(ctx, scB, claim, kernel.Derived, []string{"testDebt"})
 
 	ok := err == nil && idA != idB
 	rec.check(t, ok, Case{
@@ -1050,7 +1051,7 @@ func TestW3_EnsureBelief_DifferentScenario(t *testing.T) {
 // ---------------------------------------------------------------- helpers
 
 func retireAll(ctx context.Context, st *kernel.Store, scenarioID, id string) error {
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		if err := st.RetireDebt(ctx, scenarioID, id, item); err != nil {
 			return err
 		}
@@ -1059,7 +1060,7 @@ func retireAll(ctx context.Context, st *kernel.Store, scenarioID, id string) err
 }
 
 func promotedBelief(ctx context.Context, st *kernel.Store, sc, claim string) (string, error) {
-	id, err := st.EnterBelief(ctx, sc, claim, kernel.Derived, kernel.FullDebt)
+	id, err := st.EnterBelief(ctx, sc, claim, kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		return "", err
 	}
@@ -1689,5 +1690,340 @@ func TestDA04_EnsureBeliefPreservesExistingDebt(t *testing.T) {
 		Purpose:  "EnsureBelief does not overwrite existing debt with caller's initialDebt",
 		Expected: "same ID; debt=item_a,item_b",
 		Observed: fmt.Sprintf("sameID=%v; debt=%s", sameID, stored),
+	})
+}
+
+// --- CS_DEBT regression tests: opaque debt contract ---
+
+func TestCS_DEBT01_ArbitraryDebtAccepted(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(2001)
+
+	debt := []string{"needNullModel", "foo", "bar"}
+	id, err := st.EnterBelief(ctx, sc, "arbitrary debt claim", kernel.Derived, debt)
+	if err != nil {
+		t.Fatalf("EnterBelief: %v", err)
+	}
+
+	var stored string
+	err = shared.QueryRowContext(ctx,
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, id).Scan(&stored)
+	if err != nil {
+		t.Fatalf("read debt: %v", err)
+	}
+
+	ok := stored == "needNullModel,foo,bar"
+	rec.check(t, ok, Case{
+		ID: "DEBT-01", Wave: "cs",
+		Purpose:   "Arbitrary non-empty debt identifiers are accepted",
+		Expected:  "stored debt == needNullModel,foo,bar",
+		Observed:  "stored debt == " + stored,
+		Invariant: "Solvent accepts opaque debt identifiers",
+	})
+}
+
+func TestCS_DEBT02_EmptyDebtAccepted(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(2002)
+
+	id, err := st.EnterBelief(ctx, sc, "empty debt claim", kernel.Derived, []string{})
+	if err != nil {
+		t.Fatalf("EnterBelief: %v", err)
+	}
+
+	var debtLen int
+	err = shared.QueryRowContext(ctx,
+		`SELECT coalesce(array_length(debt,1),0) FROM belief WHERE id=$1::UUID`, id).Scan(&debtLen)
+	if err != nil {
+		t.Fatalf("read debt: %v", err)
+	}
+
+	rec.check(t, debtLen == 0, Case{
+		ID: "DEBT-02", Wave: "cs",
+		Purpose:   "Explicit empty debt array is accepted",
+		Expected:  "0 debt items",
+		Observed:  fmt.Sprintf("%d debt items", debtLen),
+		Invariant: "Empty debt accepted",
+	})
+}
+
+func TestCS_DEBT03_NilDebtDefaultsEmpty(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(2003)
+
+	id, err := st.EnterBelief(ctx, sc, "nil debt claim", kernel.Derived, nil)
+	if err != nil {
+		t.Fatalf("EnterBelief: %v", err)
+	}
+
+	var debtLen int
+	err = shared.QueryRowContext(ctx,
+		`SELECT coalesce(array_length(debt,1),0) FROM belief WHERE id=$1::UUID`, id).Scan(&debtLen)
+	if err != nil {
+		t.Fatalf("read debt: %v", err)
+	}
+
+	rec.check(t, debtLen == 0, Case{
+		ID: "DEBT-03", Wave: "cs",
+		Purpose:   "Nil debt input results in empty stored debt",
+		Expected:  "0 debt items",
+		Observed:  fmt.Sprintf("%d debt items", debtLen),
+		Invariant: "Nil debt normalized to empty",
+	})
+}
+
+func TestCS_DEBT04_UnknownDebtAccepted(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(2004)
+
+	id, err := st.EnterBelief(ctx, sc, "unknown debt claim", kernel.Derived, []string{"completelyUnknownDebt"})
+	if err != nil {
+		t.Fatalf("EnterBelief: %v", err)
+	}
+
+	var stored string
+	err = shared.QueryRowContext(ctx,
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, id).Scan(&stored)
+	if err != nil {
+		t.Fatalf("read debt: %v", err)
+	}
+
+	rec.check(t, stored == "completelyUnknownDebt", Case{
+		ID: "DEBT-04", Wave: "cs",
+		Purpose:   "Completely unknown debt identifier is accepted",
+		Expected:  "stored debt == completelyUnknownDebt",
+		Observed:  "stored debt == " + stored,
+		Invariant: "Solvent does not validate debt vocabulary",
+	})
+}
+
+func TestCS_DEBT05_ArbitraryDebtRetirement(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(2005)
+
+	id, err := st.EnterBelief(ctx, sc, "arbitrary debt retire", kernel.Derived, []string{"foo", "bar"})
+	if err != nil {
+		t.Fatalf("EnterBelief: %v", err)
+	}
+
+	if err := st.RetireDebt(ctx, sc, id, "foo"); err != nil {
+		t.Fatalf("RetireDebt: %v", err)
+	}
+
+	var stored string
+	err = shared.QueryRowContext(ctx,
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, id).Scan(&stored)
+	if err != nil {
+		t.Fatalf("read debt: %v", err)
+	}
+
+	rec.check(t, stored == "bar", Case{
+		ID: "DEBT-05", Wave: "cs",
+		Purpose:   "Arbitrary debt item can be retired",
+		Expected:  "stored debt == bar",
+		Observed:  "stored debt == " + stored,
+		Invariant: "RetireDebt works with arbitrary identifiers",
+	})
+}
+
+func TestCS_DEBT06_PromotionBlockedWithArbitraryDebt(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(2006)
+
+	id, err := st.EnterBelief(ctx, sc, "arbitrary debt blocks promotion", kernel.Derived, []string{"foo"})
+	if err != nil {
+		t.Fatalf("EnterBelief: %v", err)
+	}
+
+	err = st.Promote(ctx, sc, id)
+
+	var sqlstate, constraint string
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			sqlstate = pgErr.Code
+			constraint = pgErr.ConstraintName
+		}
+	}
+
+	blocked := errors.Is(err, kernel.ErrPromotionBlocked)
+	rec.check(t, blocked, Case{
+		ID: "DEBT-06", Wave: "cs",
+		Purpose:   "Promotion blocked while arbitrary debt remains",
+		Expected:  "ErrPromotionBlocked (23514 / promoted_is_debt_free)",
+		Observed:  fmt.Sprintf("err=%v sqlstate=%s constraint=%s", err, sqlstate, constraint),
+		Invariant: "Database gate enforces debt-free promotion",
+	})
+}
+
+func TestCS_DEBT07_PromotionSucceedsEmptyDebt(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(2007)
+
+	id, err := st.EnterBelief(ctx, sc, "empty debt promotes", kernel.Derived, []string{})
+	if err != nil {
+		t.Fatalf("EnterBelief: %v", err)
+	}
+
+	err = st.Promote(ctx, sc, id)
+	status, _ := beliefState(t, ctx, id)
+
+	rec.check(t, err == nil && status == "promoted", Case{
+		ID: "DEBT-07", Wave: "cs",
+		Purpose:   "Promotion succeeds when debt is empty",
+		Expected:  "nil error; status=promoted",
+		Observed:  fmt.Sprintf("err=%v; status=%s", err, status),
+		Invariant: "Empty debt permits promotion",
+	})
+}
+
+func TestCS_DEBT08_FinalTruthStillBlocked(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(2008)
+
+	id, err := st.EnterBelief(ctx, sc, "final truth claim", kernel.Derived, []string{})
+	if err != nil {
+		t.Fatalf("EnterBelief: %v", err)
+	}
+
+	// Set final_truth = true via raw SQL (no kernel API for this).
+	_, err = shared.ExecContext(ctx,
+		`UPDATE belief SET final_truth = true WHERE id = $1::UUID`, id)
+	if err != nil {
+		t.Fatalf("set final_truth: %v", err)
+	}
+
+	err = st.Promote(ctx, sc, id)
+	blocked := errors.Is(err, kernel.ErrPromotionBlocked)
+
+	rec.check(t, blocked, Case{
+		ID: "DEBT-08", Wave: "cs",
+		Purpose:   "Final-truth claim cannot be promoted even with empty debt",
+		Expected:  "ErrPromotionBlocked",
+		Observed:  fmt.Sprintf("err=%v", err),
+		Invariant: "final_truth gate unchanged",
+	})
+}
+
+func TestCS_DEBT09_DuplicateDebtRetirement(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(2009)
+
+	id, err := st.EnterBelief(ctx, sc, "duplicate debt claim", kernel.Derived, []string{"foo", "foo"})
+	if err != nil {
+		t.Fatalf("EnterBelief: %v", err)
+	}
+
+	if err := st.RetireDebt(ctx, sc, id, "foo"); err != nil {
+		t.Fatalf("RetireDebt: %v", err)
+	}
+
+	var debtLen int
+	err = shared.QueryRowContext(ctx,
+		`SELECT coalesce(array_length(debt,1),0) FROM belief WHERE id=$1::UUID`, id).Scan(&debtLen)
+	if err != nil {
+		t.Fatalf("read debt: %v", err)
+	}
+
+	rec.check(t, debtLen == 0, Case{
+		ID: "DEBT-09", Wave: "cs",
+		Purpose:   "Retiring duplicate debt removes all matching entries (array_remove semantics)",
+		Expected:  "0 debt items after retirement",
+		Observed:  fmt.Sprintf("%d debt items", debtLen),
+		Invariant: "array_remove removes all matching occurrences",
+	})
+}
+
+func TestCS_DEBT10_RetireNonexistentBelief(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(2010)
+	fakeID := "ffffffff-ffff-4fff-8fff-ffffffffffff"
+
+	err := st.RetireDebt(ctx, sc, fakeID, "anything")
+
+	rec.check(t, errors.Is(err, kernel.ErrBeliefNotFound), Case{
+		ID: "DEBT-10", Wave: "cs",
+		Purpose:   "RetireDebt against nonexistent belief returns ErrBeliefNotFound",
+		Expected:  "ErrBeliefNotFound",
+		Observed:  fmt.Sprintf("err=%v", err),
+		Invariant: "Nonexistent belief is an error, not a no-op",
+	})
+}
+
+func TestCS_DEBT11_KernelAcceptsEmptyString(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	st := kernel.New(shared)
+	sc := scenario(2011)
+
+	// The kernel treats all strings as opaque — including "".
+	id, err := st.EnterBelief(ctx, sc, "empty string debt", kernel.Derived, []string{""})
+	if err != nil {
+		t.Fatalf("EnterBelief: %v", err)
+	}
+
+	var stored string
+	err = shared.QueryRowContext(ctx,
+		`SELECT array_to_string(debt, ',') FROM belief WHERE id=$1::UUID`, id).Scan(&stored)
+	if err != nil {
+		t.Fatalf("read debt: %v", err)
+	}
+
+	// array_to_string of [""] yields "" (empty string).
+	rec.check(t, stored == "", Case{
+		ID: "DEBT-11", Wave: "cs",
+		Purpose:   "Kernel accepts empty-string as opaque debt (domain-agnostic)",
+		Expected:  "stored debt == empty string",
+		Observed:  "stored debt == " + stored,
+		Invariant: "Solvent does not reject any opaque string",
+	})
+}
+
+func TestCS_DEBT14_MigrationSupersedesOldDefault(t *testing.T) {
+	rec.begin("cs")
+	ctx := context.Background()
+	sc := scenario(2014)
+
+	// Raw insert WITHOUT debt — relies on DDL DEFAULT.
+	_, err := shared.ExecContext(ctx, `
+		INSERT INTO belief (scenario_id, claim, claim_type)
+		VALUES ($1::UUID, 'migration test claim', 'postulated')`, sc)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	var debtLen int
+	err = shared.QueryRowContext(ctx,
+		`SELECT coalesce(array_length(debt,1),0) FROM belief WHERE scenario_id=$1::UUID`, sc).Scan(&debtLen)
+	if err != nil {
+		t.Fatalf("read debt: %v", err)
+	}
+
+	rec.check(t, debtLen == 0, Case{
+		ID: "DEBT-14", Wave: "cs",
+		Purpose:   "Migration 010 supersedes 004: new insert gets empty default",
+		Expected:  "0 debt items (empty array default)",
+		Observed:  fmt.Sprintf("%d debt items", debtLen),
+		Invariant: "Database default is empty after migration 010",
 	})
 }

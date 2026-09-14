@@ -25,6 +25,7 @@ var schemaPaths = []string{
 	"../../db/007_service_tables.sql",
 	"../../db/008_executing_state.sql",
 	"../../db/009_exact_authority_binding.sql",
+	"../../db/010_debt_opaque.sql",
 }
 
 // Scenario namespace for this package. 1111..6666 belong to the kernel, belief,
@@ -358,7 +359,7 @@ func TestC07_CitationConnectsCorpusToBelief(t *testing.T) {
 	st := kernel.New(shared)
 
 	beliefID, err := st.EnterBelief(ctx, scenarioA,
-		"etcd leader election is unstable under partition", kernel.Derived, kernel.FullDebt)
+		"etcd leader election is unstable under partition", kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatal(err)
 	}

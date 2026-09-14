@@ -276,7 +276,7 @@ func resolveSchemaPaths(schema, fixtureDir string) []string {
 	}
 	paths := []string{schemaPath}
 	// Ordered: 002 references belief(id), and 003 alters a table 002 creates.
-	for _, layer := range []string{"002_corpus.sql", "003_wizard.sql", "004_debt_vocabulary.sql"} {
+	for _, layer := range []string{"002_corpus.sql", "003_wizard.sql", "004_debt_vocabulary.sql", "010_debt_opaque.sql"} {
 		if p := filepath.Join(filepath.Dir(schemaPath), layer); fileExists(p) {
 			paths = append(paths, p)
 		}

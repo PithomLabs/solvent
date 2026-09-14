@@ -30,7 +30,17 @@ func (s *Server) handleEnterBelief(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := s.ledger.EnterBelief(r.Context(), req.ScenarioID, req.Claim, kernel.ClaimType(req.ClaimType), kernel.FullDebt)
+	debt := req.Debt
+	if debt == nil {
+		debt = []string{}
+	}
+	for _, d := range debt {
+		if d == "" {
+			writeValidationError(w, "debt", "empty string is not a valid debt identifier", "")
+			return
+		}
+	}
+	id, err := s.ledger.EnterBelief(r.Context(), req.ScenarioID, req.Claim, kernel.ClaimType(req.ClaimType), debt)
 	if err != nil {
 		writeKernelError(w, err, "")
 		return

@@ -23,6 +23,7 @@ import (
 	"github.com/PithomLabs/solvent/internal/demoseed"
 	"github.com/PithomLabs/solvent/internal/pipeline"
 	"github.com/PithomLabs/solvent/internal/testdb"
+	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/kernel"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -41,6 +42,7 @@ const (
 	cascadeSchemaPath   = "db/006_authority_justification_cascade.sql"
 	serviceSchemaPath   = "db/007_service_tables.sql"
 	executingSchemaPath = "db/008_executing_state.sql"
+	debtOpaquePath      = "db/010_debt_opaque.sql"
 	fixtureDir          = "internal/derive/testdata/etcd_real/track2"
 )
 
@@ -75,13 +77,13 @@ func main() {
 	// frozen DDL comes first and 003 comes last.
 	if tablesExist(ctx, db) {
 		fmt.Println("Base tables present. Ensuring corpus and wizard schema are current...")
-		if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath, wizardSchemaPath, debtSchemaPath, authoritySchemaPath, cascadeSchemaPath, serviceSchemaPath, executingSchemaPath); err != nil {
+		if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath, wizardSchemaPath, debtSchemaPath, authoritySchemaPath, cascadeSchemaPath, serviceSchemaPath, executingSchemaPath, debtOpaquePath); err != nil {
 			log.Fatalf("apply corpus/wizard schema: %v", err)
 		}
 	} else {
 		fmt.Println("No tables found. Applying schema...")
 		db.Close()
-		if err := testdb.ApplySchema(ctx, dsn, schemaPath, corpusSchemaPath, wizardSchemaPath, debtSchemaPath, authoritySchemaPath, cascadeSchemaPath, serviceSchemaPath, executingSchemaPath); err != nil {
+		if err := testdb.ApplySchema(ctx, dsn, schemaPath, corpusSchemaPath, wizardSchemaPath, debtSchemaPath, authoritySchemaPath, cascadeSchemaPath, serviceSchemaPath, executingSchemaPath, debtOpaquePath); err != nil {
 			log.Fatalf("apply schema: %v", err)
 		}
 		db, err = testdb.Open(dsn)
@@ -131,7 +133,7 @@ func resetAndSeed(ctx context.Context, db *sql.DB, dsn string) {
 	// idempotent (no IF NOT EXISTS), so applying it against tables that were just
 	// truncated rather than dropped fails on the first statement and would stop the
 	// whole sequence before reaching 002 and 003.
-	if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath, wizardSchemaPath, debtSchemaPath); err != nil {
+	if err := testdb.ApplySchema(ctx, dsn, corpusSchemaPath, wizardSchemaPath, debtSchemaPath, debtOpaquePath); err != nil {
 		fmt.Printf("Warning: apply corpus/wizard schema: %v\n", err)
 	}
 
@@ -167,7 +169,7 @@ func seed(ctx context.Context, db *sql.DB) {
 
 	// Step 2: Enter baseline postulated belief.
 	fmt.Println("Step 2: Entering baseline belief...")
-	beliefID, err := st.EnterBelief(ctx, scenarioID, baselineClaim, kernel.Postulated, kernel.FullDebt)
+	beliefID, err := st.EnterBelief(ctx, scenarioID, baselineClaim, kernel.Postulated, belief.WizardDebt())
 	if err != nil {
 		log.Fatalf("Step 2 EnterBelief: %v", err)
 	}
@@ -179,11 +181,11 @@ func seed(ctx context.Context, db *sql.DB) {
 	}
 	fmt.Println("Step 2: evidence attached")
 
-	// Step 3: Retire all FullDebt items, promote, create intent.
-	// Matches Beat 7 exactly — no DB scan needed, FullDebt is the canonical set.
+	// Step 3: Retire all debt items, promote, create intent.
+	// Matches Beat 7 exactly — retire the wizard debt items.
 	fmt.Println("Step 3: Retiring debts, promoting, creating intent...")
 
-	for _, d := range kernel.FullDebt {
+	for _, d := range belief.WizardDebt() {
 		if err := st.RetireDebt(ctx, scenarioID, beliefID, d); err != nil {
 			log.Fatalf("Step 3 RetireDebt(%s): %v", d, err)
 		}

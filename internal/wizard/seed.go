@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/PithomLabs/solvent/internal/demoseed"
+	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/kernel"
 )
 
@@ -99,7 +100,7 @@ func (s *Server) Seed(ctx context.Context, scenarioID string) error {
 	}
 
 	// 1. The standing assumption, with its operator-asserted provenance.
-	ancestorID, err := s.kern.EnterBelief(ctx, scenarioID, AncestorClaim, kernel.Postulated, kernel.FullDebt)
+	ancestorID, err := s.kern.EnterBelief(ctx, scenarioID, AncestorClaim, kernel.Postulated, belief.WizardDebt())
 	if err != nil {
 		return fmt.Errorf("wizard: enter ancestor: %w", err)
 	}
@@ -109,9 +110,9 @@ func (s *Server) Seed(ctx context.Context, scenarioID string) error {
 		return fmt.Errorf("wizard: attach ancestor evidence: %w", err)
 	}
 
-	// 2. The claim the judge will drive. Full debt, untouched — the six items the DDL
-	//    default issued are exactly what screen 1 is refused on.
-	if _, err := s.kern.EnterBelief(ctx, scenarioID, DescendantClaim, kernel.Derived, kernel.FullDebt); err != nil {
+	// 2. The claim the judge will drive. Full debt, untouched — the six items
+	//    belief.WizardDebt() supplies are exactly what screen 1 is refused on.
+	if _, err := s.kern.EnterBelief(ctx, scenarioID, DescendantClaim, kernel.Derived, belief.WizardDebt()); err != nil {
 		return fmt.Errorf("wizard: enter descendant: %w", err)
 	}
 
@@ -123,7 +124,7 @@ func (s *Server) Seed(ctx context.Context, scenarioID string) error {
 	// 4. Promote the ancestor only. It is a decision already taken, so it carries no
 	//    outstanding debt; the descendant keeps all six, which is what screen 1 refuses
 	//    on and screen 2 discharges.
-	for _, d := range kernel.FullDebt {
+	for _, d := range belief.WizardDebt() {
 		if err := s.kern.RetireDebt(ctx, scenarioID, ancestorID, d); err != nil {
 			return fmt.Errorf("wizard: retire %s on ancestor: %w", d, err)
 		}
@@ -150,8 +151,8 @@ func (s *Server) Seed(ctx context.Context, scenarioID string) error {
 	if st.AncestorDebt != 0 {
 		return fmt.Errorf("wizard: seed verify: ancestor debt = %d, want 0", st.AncestorDebt)
 	}
-	if st.DescDebt != len(kernel.FullDebt) {
-		return fmt.Errorf("wizard: seed verify: descendant debt = %d, want %d", st.DescDebt, len(kernel.FullDebt))
+	if st.DescDebt != len(belief.WizardDebt()) {
+		return fmt.Errorf("wizard: seed verify: descendant debt = %d, want %d", st.DescDebt, len(belief.WizardDebt()))
 	}
 	if st.Edges != 1 {
 		return fmt.Errorf("wizard: seed verify: edges = %d, want 1", st.Edges)

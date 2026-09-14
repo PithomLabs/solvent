@@ -52,7 +52,7 @@ func Ingest(ctx context.Context, db *sql.DB, scenarioID string, fixturePath stri
 	// belief.Process is idempotent but does not return the belief ID; ensure it
 	// first so the demo can address the belief by ID.
 	b := Belief(evidence)
-	beliefID, err := st.EnsureBelief(ctx, scenarioID, b.Claim, kernel.Derived, kernel.FullDebt)
+	beliefID, err := st.EnsureBelief(ctx, scenarioID, b.Claim, kernel.Derived, belief.WizardDebt())
 	if err != nil {
 		return Result{}, fmt.Errorf("agentjacking: ensure belief: %w", err)
 	}

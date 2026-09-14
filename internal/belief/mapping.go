@@ -12,24 +12,27 @@ type DebtRule struct {
 // DebtMapping maps evidence source types to the debt rules they trigger.
 // This table is the only place domain knowledge enters the wiring layer.
 // It is a compile-time constant — no configuration, no runtime mutation.
+//
+// All debt item references use the named constants from debt.go,
+// ensuring a single source of truth for the deployment-review vocabulary.
 var DebtMapping = map[string][]DebtRule{
 	"kev_entry": {
-		{Match: regexp.MustCompile(`(?i)vulnerable to`), Items: []string{"needProvenanceCheck"}},
+		{Match: regexp.MustCompile(`(?i)vulnerable to`), Items: []string{NeedProvenanceCheck}},
 	},
 	"release": {
-		{Match: regexp.MustCompile(`(?i)release`), Items: []string{"needProvenanceCheck", "needContradictionSweep"}},
+		{Match: regexp.MustCompile(`(?i)release`), Items: []string{NeedProvenanceCheck, NeedContradictionSweep}},
 	},
 	"maintainer_comment": {
-		{Match: regexp.MustCompile(`(?i)\b(fixed|fix released|patch available)\b`), Items: []string{"needProvenanceCheck", "needContradictionSweep"}},
-		{Match: regexp.MustCompile(`(?i)\b(tested|confirmed)\b`), Items: []string{"needBlastRadius", "needRollbackPlan"}},
-		{Match: regexp.MustCompile(`(?i)\bno regression\b`), Items: []string{"needRollbackPlan", "needVersionPin"}},
-		{Match: regexp.MustCompile(`(?i)\b(security review|reviewed by)\b`), Items: []string{"needOperatorSignoff"}},
+		{Match: regexp.MustCompile(`(?i)\b(fixed|fix released|patch available)\b`), Items: []string{NeedProvenanceCheck, NeedContradictionSweep}},
+		{Match: regexp.MustCompile(`(?i)\b(tested|confirmed)\b`), Items: []string{NeedBlastRadius, NeedRollbackPlan}},
+		{Match: regexp.MustCompile(`(?i)\bno regression\b`), Items: []string{NeedRollbackPlan, NeedVersionPin}},
+		{Match: regexp.MustCompile(`(?i)\b(security review|reviewed by)\b`), Items: []string{NeedOperatorSignoff}},
 	},
 	"github_pr": {
-		{Match: regexp.MustCompile(`(?i)\bfix\b`), Items: []string{"needProvenanceCheck", "needContradictionSweep"}},
+		{Match: regexp.MustCompile(`(?i)\bfix\b`), Items: []string{NeedProvenanceCheck, NeedContradictionSweep}},
 	},
 	"github_advisory": {
-		{Match: regexp.MustCompile(`(?i)vulnerable to`), Items: []string{"needProvenanceCheck"}},
+		{Match: regexp.MustCompile(`(?i)vulnerable to`), Items: []string{NeedProvenanceCheck}},
 	},
 }
 

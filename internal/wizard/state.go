@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/PithomLabs/solvent/internal/corpus"
-	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/internal/belief"
 )
 
 // Screen names, as the contract's stepper spells them.
@@ -80,15 +80,15 @@ type State struct {
 }
 
 // checkPrompts is the contract's copy deck, in the contract's order. The order is
-// kernel.FullDebt's, so the six rows on screen always match the six the database
-// defaulted the belief to.
+// belief.WizardDebt() supplies, so the six rows on screen always match the debt
+// the caller explicitly supplied when creating the belief.
 var checkPrompts = map[string]string{
-	"needProvenanceCheck":    "cite a retrieved issue",
-	"needContradictionSweep": "cite a retrieved issue",
-	"needBlastRadius":        "name affected components",
-	"needRollbackPlan":       "link a runbook",
-	"needVersionPin":         "state a version range",
-	"needOperatorSignoff":    "record a handle",
+	belief.NeedProvenanceCheck:    "cite a retrieved issue",
+	belief.NeedContradictionSweep: "cite a retrieved issue",
+	belief.NeedBlastRadius:        "name affected components",
+	belief.NeedRollbackPlan:       "link a runbook",
+	belief.NeedVersionPin:         "state a version range",
+	belief.NeedOperatorSignoff:    "record a handle",
 }
 
 // retrievalChecks are the two checks a judge cannot discharge by typing.
@@ -98,13 +98,13 @@ var checkPrompts = map[string]string{
 // replaced the debt strings for real, so the two vocabularies are now one and the
 // alias layer is gone -- a set is all that is left of it.
 var retrievalChecks = map[string]bool{
-	"needProvenanceCheck":    true,
-	"needContradictionSweep": true,
+	belief.NeedProvenanceCheck:    true,
+	belief.NeedContradictionSweep: true,
 }
 
 // ContradictionCheck is the debt item that requires a citation and produces the third
 // refusal when none exists.
-const ContradictionCheck = "needContradictionSweep"
+const ContradictionCheck = belief.NeedContradictionSweep
 
 // ProjectedState is what screen 1 looks like before anything has been written.
 //
@@ -128,13 +128,13 @@ func (s *Server) ProjectedState(ctx context.Context) (State, error) {
 		Seeded:         false,
 		Claim:          DescendantClaim,
 		Status:         "entered",
-		Debt:           len(kernel.FullDebt),
+		Debt:           len(belief.WizardDebt()),
 		Ancestor:       AncestorClaim,
 		AncestorStatus: "promoted",
 		Citations:      []Citation{},
 		Refusals:       []Refusal{},
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range belief.WizardDebt() {
 		st.Checks = append(st.Checks, Check{
 			Item:      item,
 			Name:      item,
@@ -344,8 +344,8 @@ func (s *Server) checks(ctx context.Context, beliefID string, cites []Citation) 
 	}
 
 	next := 0
-	out := make([]Check, 0, len(kernel.FullDebt))
-	for _, item := range kernel.FullDebt {
+	out := make([]Check, 0, len(belief.WizardDebt()))
+	for _, item := range belief.WizardDebt() {
 		c := Check{Item: item, Name: item, Prompt: checkPrompts[item], Done: !outstanding[item]}
 		if retrievalChecks[item] {
 			c.Retrieval = true

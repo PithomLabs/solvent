@@ -9,9 +9,10 @@ import (
 
 // EnterBeliefRequest is the request body for POST /v1/beliefs.
 type EnterBeliefRequest struct {
-	ScenarioID string `json:"scenario_id"`
-	Claim      string `json:"claim"`
-	ClaimType  string `json:"claim_type"`
+	ScenarioID string   `json:"scenario_id"`
+	Claim      string   `json:"claim"`
+	ClaimType  string   `json:"claim_type"`
+	Debt       []string `json:"debt,omitempty"`
 }
 
 // BeliefResponse is a belief representation in API responses.

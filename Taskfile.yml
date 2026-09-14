@@ -33,6 +33,7 @@ tasks:
       - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/007_service_tables.sql
       - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/008_executing_state.sql
       - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/009_exact_authority_binding.sql
+      - docker exec -i solvent-crdb cockroach sql --insecure --database=fable < db/010_debt_opaque.sql
       - echo "Database reset complete."
 
   demo:track1:

@@ -70,8 +70,8 @@ SQLSTATE codes, never substring matching on error text.
 - `New(db *sql.DB) *Store`
   Wraps an open pool pointed at a database with `db/001_schema.sql` applied.
 
-- `EnterBelief(ctx, scenarioID, claim string, ct ClaimType) (id string, err error)`
-  Inserts a belief at the door: `status='entered'`, `debt` = full starting debt, unpromoted.
+- `EnterBelief(ctx, scenarioID, claim string, ct ClaimType, initialDebt []string) (id string, err error)`
+  Inserts a belief at the door: `status=.entered.`, `debt` = caller-supplied initial debt, unpromoted.
   Never gated. Returns the new id.
 
 - `AddEvidence(ctx, scenarioID, beliefID, provenanceClass, sourceURL, contentSHA256 string) err`
@@ -97,14 +97,14 @@ SQLSTATE codes, never substring matching on error text.
   Returns the count of live intents whose belief is not promoted. MUST always return 0 in
   committed state (this is Invariant I-5 expressed as a query).
 
-- `EnsureBelief(ctx, scenarioID, claim string, ct ClaimType) (id string, err error)`
+- `EnsureBelief(ctx, scenarioID, claim string, ct ClaimType, initialDebt []string) (id string, err error)`
   Returns the ID of a belief with the given claim in the scenario. If no such belief exists,
-  creates one with the given claim type, full starting debt, and `status='entered'`. The
+  creates one with the given claim type, caller-supplied starting debt, and `status=.entered.`. The
   find-or-create is a single transaction. The caller does not need to know whether the belief
   was newly created.
 
 Exported sentinels required: `ErrPromotionBlocked`, `ErrActionOnUnpromoted`.
-Exported value required: full starting debt list (the six debt items).
+Exported function required: WizardDebt() returning the domain-owned starting debt list.
 
 ---
 

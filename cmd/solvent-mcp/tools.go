@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/PithomLabs/solvent/internal/pipeline"
@@ -115,22 +114,11 @@ func handleSolventRetireDebt(ctx context.Context, db *sql.DB, args map[string]in
 		return errorResult(fmt.Errorf("unknown scenario: %q (valid: %s)", scenario, strings.Join(scenarioNames(), ", "))), nil
 	}
 
-	// An unrecognised debt item is refused here, not by the schema.
-	//
-	// Two reasons this has to be a handler check. This SDK's low-level AddTool states
-	// that validating arguments against the input schema is the caller's job, so the
-	// enum advertises the vocabulary but enforces nothing. And RetireDebt is
-	// array_remove: retiring an item that is not present changes no array, still matches
-	// the row, and returns success. Together those mean a typo or a stale vocabulary
-	// would report "retired" and then fail one step later at promote time as
-	// 23514 promoted_is_debt_free -- nowhere near the actual mistake.
-	//
-	// Refusing here keeps the error at the call that was wrong. Note this is not a
-	// business rule: it rejects items the database never issues. Retiring a real item
-	// that this belief has already discharged stays a no-op, as the kernel defines it.
-	if !slices.Contains(kernel.FullDebt, item) {
-		return errorResult(fmt.Errorf("unknown debt_item: %q (valid: %s)",
-			item, strings.Join(kernel.FullDebt, ", "))), nil
+	// Reject malformed empty-string debt items. Solvent treats all non-empty
+	// debt identifiers as opaque — vocabulary validation belongs to the domain,
+	// not the kernel or the MCP boundary.
+	if item == "" {
+		return errorResult(fmt.Errorf("empty debt_item is not a valid identifier")), nil
 	}
 
 	// Cross-scenario guard: verify the belief belongs to this scenario.

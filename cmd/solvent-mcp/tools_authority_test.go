@@ -37,6 +37,7 @@ func TestMain(m *testing.M) {
 		"../../db/007_service_tables.sql",
 		"../../db/008_executing_state.sql",
 		"../../db/009_exact_authority_binding.sql",
+	"../../db/010_debt_opaque.sql",
 	}
 	if err := testdb.Reset(ctx, dsn, schemaPaths...); err != nil {
 		fmt.Fprintf(os.Stderr, "solvent-mcp cannot start: %v\n", err)
@@ -68,11 +69,11 @@ func TestMain(m *testing.M) {
 // promoteTestBelief creates a belief, retires all debt, and promotes it.
 func promoteTestBelief(t *testing.T, ctx context.Context, st *kernel.Store, sc, claim string) string {
 	t.Helper()
-	bid, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived, kernel.FullDebt)
+	bid, err := st.EnsureBelief(ctx, sc, claim, kernel.Derived, []string{"testDebt"})
 	if err != nil {
 		t.Fatalf("setup (ensure belief): %v", err)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range []string{"testDebt"} {
 		_ = st.RetireDebt(ctx, sc, bid, item)
 	}
 	if err := st.Promote(ctx, sc, bid); err != nil {

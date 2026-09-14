@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/internal/belief"
 )
 
 // The refusal text for a contradiction sweep with nothing cited.
@@ -213,10 +213,10 @@ func (s *Server) debtOutstanding(ctx context.Context, beliefID, item string) (bo
 	return yes, nil
 }
 
-// FullDebtNames is kernel.FullDebt, exposed so a template can render the six rows in
-// the database's own order without importing the kernel.
+// FullDebtNames returns belief.WizardDebt() so a template can render the six
+// debt rows in vocabulary order.
 func FullDebtNames() []string {
-	out := make([]string, len(kernel.FullDebt))
-	copy(out, kernel.FullDebt)
+	out := make([]string, len(belief.WizardDebt()))
+	copy(out, belief.WizardDebt())
 	return out
 }

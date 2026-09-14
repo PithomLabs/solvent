@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/PithomLabs/solvent/internal/wizard"
-	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/internal/belief"
 )
 
 // ledgerScenario is the Track 2 scenario the read-only ledger pages display.
@@ -66,7 +66,7 @@ func TestW32_WizardDoesNotDisturbLedgerCounts(t *testing.T) {
 			`{"corpus_id":"`+h["corpus_id"].(string)+`","query":"ledger isolation","distance":`+
 				jsonNum(h["distance"])+`,"on":true}`)
 	}
-	for _, item := range kernel.FullDebt {
+	for _, item := range belief.WizardDebt() {
 		c.do(http.MethodPost, wizard.Prefix+"/api/discharge",
 			`{"check":"`+item+`","artifact":"`+operatorArtifacts[item]+`"}`)
 	}

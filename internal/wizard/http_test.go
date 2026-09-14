@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/PithomLabs/solvent/internal/wizard"
-	"github.com/PithomLabs/solvent/kernel"
+	"github.com/PithomLabs/solvent/internal/belief"
 )
 
 // client drives the wizard over HTTP the way a browser does, carrying the cookie.
@@ -151,7 +151,7 @@ func TestW16_EndToEndOverHTTP(t *testing.T) {
 	}
 
 	// The contradiction sweep is discharged from the citation; the rest take artifacts.
-	for _, item := range kernel.FullDebt {
+	for _, item := range belief.WizardDebt() {
 		body := `{"check":"` + item + `","artifact":"` + operatorArtifacts[item] + `"}`
 		_, dv := c.do(http.MethodPost, wizard.Prefix+"/api/discharge", body)
 		if dv["ok"] != true {

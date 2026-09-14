@@ -54,7 +54,7 @@ func Process(ctx context.Context, db *sql.DB, scenarioID string, b derive.Derive
 	}
 
 	// Step 1: Ensure belief exists.
-	beliefID, err := st.EnsureBelief(ctx, scenarioID, b.Claim, ct, kernel.FullDebt)
+	beliefID, err := st.EnsureBelief(ctx, scenarioID, b.Claim, ct, wizardDebt)
 	if err != nil {
 		return err
 	}
