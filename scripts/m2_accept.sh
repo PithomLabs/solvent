@@ -9,6 +9,7 @@
 # A suite that failed once has nothing to prove by repeating, so run 2 is skipped on
 # failure and the gate exits non-zero with docs/M2_FAILURE.md already written.
 set -euo pipefail
+export M2_TRANSCRIPT=1
 
 cd "$(dirname "$0")/.."
 

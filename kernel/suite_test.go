@@ -76,9 +76,11 @@ func TestMain(m *testing.M) {
 
 	_ = shared.Close()
 
-	if err := rec.writeTranscript(transcriptPath); err != nil {
-		fmt.Fprintf(os.Stderr, "could not write transcript: %v\n", err)
-		code = 1
+	if os.Getenv("M2_TRANSCRIPT") == "1" {
+		if err := rec.writeTranscript(transcriptPath); err != nil {
+			fmt.Fprintf(os.Stderr, "could not write transcript: %v\n", err)
+			code = 1
+		}
 	}
 	if rec.failed() > 0 {
 		if err := rec.writeFailureArtifact(failurePath); err != nil {

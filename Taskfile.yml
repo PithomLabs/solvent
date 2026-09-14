@@ -294,6 +294,11 @@ tasks:
       # cannot enforce for us.
       - scripts/mcp_verify.sh
 
+
+  test:m2:
+    desc: Run the canonical M2 behavioral gate (regenerates transcript)
+    cmds:
+      - bash scripts/m2_accept.sh
   lint:openapi:
     desc: Lint OpenAPI specification with Spectral
     cmds:
