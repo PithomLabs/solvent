@@ -212,7 +212,7 @@ func main() {
 	}, toolHandler("solvent_ingest_evidence"))
 
 	server.AddTool(&mcp.Tool{
-		Name: "solvent_retire_debt",
+		Name:        "solvent_retire_debt",
 		Description: "Record that one review obligation on a belief has been discharged. debt_item is an opaque string — valid values can be discovered by inspecting the belief's current debt via solvent_ledger. An empty string is rejected as malformed input.",
 		InputSchema: map[string]any{
 			"type": "object",

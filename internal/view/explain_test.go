@@ -7,10 +7,10 @@ import (
 	"os"
 	"testing"
 
+	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/internal/view"
 	"github.com/PithomLabs/solvent/kernel"
-	"github.com/PithomLabs/solvent/internal/belief"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -35,7 +35,7 @@ func TestMain(m *testing.M) {
 		"../../db/007_service_tables.sql",
 		"../../db/008_executing_state.sql",
 		"../../db/009_exact_authority_binding.sql",
-	"../../db/010_debt_opaque.sql",
+		"../../db/010_debt_opaque.sql",
 	}
 	if err := testdb.Reset(ctx, dsnExplain, schemaPaths...); err != nil {
 		fmt.Fprintf(os.Stderr, "view explain tests cannot start: %v\n", err)

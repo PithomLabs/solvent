@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/PithomLabs/solvent/internal/wizard"
 	"github.com/PithomLabs/solvent/internal/belief"
+	"github.com/PithomLabs/solvent/internal/wizard"
 )
 
 // ledgerScenario is the Track 2 scenario the read-only ledger pages display.

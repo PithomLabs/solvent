@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/PithomLabs/solvent/internal/corpus"
 	"github.com/PithomLabs/solvent/internal/belief"
+	"github.com/PithomLabs/solvent/internal/corpus"
 )
 
 // Screen names, as the contract's stepper spells them.

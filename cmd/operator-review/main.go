@@ -36,9 +36,9 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/kernel"
-	"github.com/PithomLabs/solvent/internal/belief"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )

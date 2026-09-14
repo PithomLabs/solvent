@@ -8,9 +8,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/internal/corpus"
 	"github.com/PithomLabs/solvent/internal/wizard"
-	"github.com/PithomLabs/solvent/internal/belief"
 )
 
 // artifacts for the four operator checks, in belief.WizardDebt() order.

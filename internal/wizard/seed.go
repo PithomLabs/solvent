@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/PithomLabs/solvent/internal/demoseed"
 	"github.com/PithomLabs/solvent/internal/belief"
+	"github.com/PithomLabs/solvent/internal/demoseed"
 	"github.com/PithomLabs/solvent/kernel"
 )
 

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/internal/corpus"
 	"github.com/PithomLabs/solvent/internal/wizard"
-	"github.com/PithomLabs/solvent/internal/belief"
 )
 
 // atFalsify drives a scenario all the way to the FALSIFY screen: refusals logged, all

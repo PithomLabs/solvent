@@ -128,14 +128,16 @@ This is now resolved: **the kernel mechanism AND initialization are both domain-
 
 | Operation | REST Auth | REST Authz | MCP Auth | Wizard Auth | DB Auth |
 |-----------|-----------|------------|----------|-------------|---------|
-| RetireDebt | YES | **NONE** — any principal can retire any debt on any belief | NONE (local) | App-level checks (citation, artifact) | root |
-| Discharge | YES | **NONE** — `discharged_by` is caller-supplied, not verified | NONE (local) | N/A (wizard uses RetireDebt directly) | root |
+| RetireDebt | YES | **BEST-EFFORT** — principal existence + revocation check (TOCTOU race documented) | NONE (local) | App-level checks (citation, artifact) | root |
+| Discharge | YES | **YES** — `discharged_by` validated against authenticated principal; impersonation rejected with 403 | NONE (local) | N/A (wizard uses RetireDebt directly) | root |
 | Promote | YES | **NONE** — any principal can promote if debt is empty | NONE (local) | NONE (deliberate — schema is the gate) | root |
 | EnterBelief | YES | **NONE** — any principal can create any belief | NONE (pipeline only) | Seed only | root |
 
-**Key gap:** The REST API has authentication but no authorization for debt operations. Any authenticated principal can retire any debt on any belief. The `discharged_by` field in `Discharge` is caller-supplied and not verified against the authenticated principal.
+**RetireDebt access control:** The service layer verifies the authenticated principal exists in the `principal` table and is not revoked before calling the kernel. This is a best-effort liveness pre-check — the kernel owns its internal `crdb.ExecuteTx`, so this check cannot be made atomic with the debt mutation. The residual TOCTOU race is documented and accepted: revocation takes effect immediately for all new requests.
 
-**Is this a kernel concern?** No. This is a service/API-layer authorization gap. The kernel correctly delegates to the database for invariant enforcement. The missing authorization is a deployment/policy concern, not a kernel design defect.
+**Discharge access control:** The `discharged_by` field is validated against the authenticated principal. Caller-supplied impersonation is rejected with HTTP 403 `discharged_by_mismatch`. The effective `discharged_by` is derived from the API key, not the request body. This follows the existing `actor_id_mismatch` pattern from `handleAuthorizeAction`.
+
+**Is this a kernel concern?** No. These are service/API-layer access controls. The kernel correctly delegates to the database for invariant enforcement. The access controls are a deployment/policy concern, not a kernel design defect.
 
 ### 8. Schema enforcement summary
 

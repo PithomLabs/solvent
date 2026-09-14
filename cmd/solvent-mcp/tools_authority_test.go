@@ -37,7 +37,7 @@ func TestMain(m *testing.M) {
 		"../../db/007_service_tables.sql",
 		"../../db/008_executing_state.sql",
 		"../../db/009_exact_authority_binding.sql",
-	"../../db/010_debt_opaque.sql",
+		"../../db/010_debt_opaque.sql",
 	}
 	if err := testdb.Reset(ctx, dsn, schemaPaths...); err != nil {
 		fmt.Fprintf(os.Stderr, "solvent-mcp cannot start: %v\n", err)

@@ -12,10 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	_ "github.com/jackc/pgx/v5/stdlib" // D-019: pgx/v5 is the sole approved driver
 
+	"github.com/PithomLabs/solvent/internal/belief"
 	"github.com/PithomLabs/solvent/internal/corpus"
 	"github.com/PithomLabs/solvent/internal/testdb"
 	"github.com/PithomLabs/solvent/internal/wizard"
-	"github.com/PithomLabs/solvent/internal/belief"
 )
 
 var schemaPaths = []string{

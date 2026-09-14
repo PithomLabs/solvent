@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PithomLabs/solvent/internal/wizard"
 	"github.com/PithomLabs/solvent/internal/belief"
+	"github.com/PithomLabs/solvent/internal/wizard"
 )
 
 // client drives the wizard over HTTP the way a browser does, carrying the cookie.
