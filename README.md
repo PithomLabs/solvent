@@ -7,12 +7,6 @@ The core idea: As AI agents accelerate in their capabilities, we need the equiva
 
 ![Logo](solvent_dark.png)
 
-**Live demo: https://byb43s8nh2.us-west-2.awsapprunner.com/demo**  
-**Demo video: https://www.youtube.com/watch?v=EtFUaCnbHPA**
-
-Also live: [`/proof`](https://byb43s8nh2.us-west-2.awsapprunner.com/proof) (the control experiment)
-and [`/ledger`](https://byb43s8nh2.us-west-2.awsapprunner.com/ledger) (read-only ledger).
-
 ![Solvent](solvent.png)
 
 ## What Solvent is
