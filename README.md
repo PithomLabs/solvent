@@ -141,8 +141,7 @@ enforces the invariant at the authority boundary.** That distinction matters if 
 
 ## Control experiment
 
-The same race, the same correct application logic, three schemas. Served at
-[`/proof`](https://byb43s8nh2.us-west-2.awsapprunner.com/proof).
+The same race, the same correct application logic, three schemas. 
 
 | Cell | Schema   | Isolation        | Observed                                          | Where                     |
 | ---- | -------- | ---------------- | ------------------------------------------------- | ------------------------- |
